@@ -265,18 +265,20 @@ class SettingsActivity : BaseActivity() {
                 SettingEntry("以全屏模式运行", if (prefs.fullscreenEnabled) "开" else "关", null),
             )
 
-            "播放设置" -> listOf(
-                SettingEntry("默认画质", qnText(prefs.playerPreferredQn), null),
-                SettingEntry("默认音轨", audioText(prefs.playerPreferredAudioId), null),
-                SettingEntry("CDN线路", cdnText(prefs.playerCdnPreference), null),
-                SettingEntry("默认播放速度", String.format(Locale.US, "%.2fx", prefs.playerSpeed), null),
-                SettingEntry("自动跳到上次播放位置", if (prefs.playerAutoResumeEnabled) "开" else "关", null),
-                SettingEntry("自动跳过片段（空降助手）", if (prefs.playerAutoSkipSegmentsEnabled) "开" else "关", null),
-                SettingEntry("播放前打开详情页", if (prefs.playerOpenDetailBeforePlay) "开" else "关", "点击视频卡片后先进入详情页"),
-                SettingEntry("播放模式", playbackModeText(prefs.playerPlaybackMode), null),
-                SettingEntry("字幕语言", subtitleLangText(prefs.subtitlePreferredLang), null),
-                SettingEntry("默认开启字幕", if (prefs.subtitleEnabledDefault) "开" else "关", null),
-                SettingEntry("视频编码", prefs.playerPreferredCodec, null),
+	            "播放设置" -> listOf(
+	                SettingEntry("默认画质", qnText(prefs.playerPreferredQn), null),
+	                SettingEntry("默认音轨", audioText(prefs.playerPreferredAudioId), null),
+	                SettingEntry("CDN线路", cdnText(prefs.playerCdnPreference), null),
+	                SettingEntry("默认播放速度", String.format(Locale.US, "%.2fx", prefs.playerSpeed), null),
+	                SettingEntry("长按快进倍率", String.format(Locale.US, "%.2fx", prefs.playerHoldSeekSpeed), null),
+	                SettingEntry("长按快进模式", holdSeekModeText(prefs.playerHoldSeekMode), null),
+	                SettingEntry("自动跳到上次播放位置", if (prefs.playerAutoResumeEnabled) "开" else "关", null),
+	                SettingEntry("自动跳过片段（空降助手）", if (prefs.playerAutoSkipSegmentsEnabled) "开" else "关", null),
+	                SettingEntry("播放前打开详情页", if (prefs.playerOpenDetailBeforePlay) "开" else "关", null),
+	                SettingEntry("播放模式", playbackModeText(prefs.playerPlaybackMode), null),
+	                SettingEntry("字幕语言", subtitleLangText(prefs.subtitlePreferredLang), null),
+	                SettingEntry("默认开启字幕", if (prefs.subtitleEnabledDefault) "开" else "关", null),
+	                SettingEntry("视频编码", prefs.playerPreferredCodec, null),
                 SettingEntry("控制栏按钮", playerActionButtonsText(prefs.playerActionButtons), null),
                 SettingEntry("显示视频调试信息", if (prefs.playerDebugEnabled) "开" else "关", null),
                 SettingEntry("按两次退出键才退出播放器", if (prefs.playerDoubleBackToExit) "开" else "关", null),
@@ -615,6 +617,39 @@ class SettingsActivity : BaseActivity() {
                 ) { selected ->
                     val v = selected.removeSuffix("x").toFloatOrNull()
                     if (v != null) prefs.playerSpeed = v.coerceIn(0.25f, 3.0f)
+                    refreshSection(entry.title)
+                }
+            }
+
+            "长按快进倍率" -> {
+                val options = listOf(1.5f, 2.0f, 3.0f, 4.0f)
+                showChoiceDialog(
+                    title = "长按快进倍率",
+                    items = options.map { String.format(Locale.US, "%.2fx", it) },
+                    current = String.format(Locale.US, "%.2fx", prefs.playerHoldSeekSpeed),
+                ) { selected ->
+                    val v = selected.removeSuffix("x").toFloatOrNull()
+                    if (v != null) prefs.playerHoldSeekSpeed = v.coerceIn(1.5f, 4.0f)
+                    refreshSection(entry.title)
+                }
+            }
+
+            "长按快进模式" -> {
+                val options = listOf(
+                    blbl.cat3399.core.prefs.AppPrefs.PLAYER_HOLD_SEEK_MODE_SPEED to "倍率加速",
+                    blbl.cat3399.core.prefs.AppPrefs.PLAYER_HOLD_SEEK_MODE_SCRUB to "拖动进度条",
+                )
+                val labels = options.map { it.second }
+                val checked = options.indexOfFirst { it.first == prefs.playerHoldSeekMode }.coerceAtLeast(0)
+                blbl.cat3399.core.ui.SingleChoiceDialog.show(
+                    context = this,
+                    title = "长按快进模式",
+                    items = labels,
+                    checkedIndex = checked,
+                    negativeText = "取消",
+                ) { which, _ ->
+                    val value = options.getOrNull(which)?.first ?: blbl.cat3399.core.prefs.AppPrefs.PLAYER_HOLD_SEEK_MODE_SPEED
+                    prefs.playerHoldSeekMode = value
                     refreshSection(entry.title)
                 }
             }
@@ -1364,6 +1399,11 @@ class SettingsActivity : BaseActivity() {
     private fun cdnText(code: String): String = when (code) {
         blbl.cat3399.core.prefs.AppPrefs.PLAYER_CDN_MCDN -> "mcdn"
         else -> "bilivideo"
+    }
+
+    private fun holdSeekModeText(code: String): String = when (code) {
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_HOLD_SEEK_MODE_SCRUB -> "拖动进度条"
+        else -> "倍率加速"
     }
 
     private fun playerActionButtonsText(buttons: List<String>): String {

@@ -45,9 +45,14 @@ class LivePlayerActivity : BaseActivity() {
     private var player: ExoPlayer? = null
     private var autoHideJob: Job? = null
     private var debugJob: Job? = null
+    private var autoFailoverJob: Job? = null
     private var finishOnBackKeyUp: Boolean = false
     private var controlsVisible: Boolean = false
     private var lastInteractionAtMs: Long = 0L
+    private var autoFailoverWindowStartAtMs: Long = 0L
+    private var autoFailoverSwitchCount: Int = 0
+    private var autoFailoverLastSwitchAtMs: Long = 0L
+    private var autoFailoverInFlight: Boolean = false
 
     private val doubleBackToExit by lazy {
         DoubleBackToExitHandler(context = this, windowMs = BACK_DOUBLE_PRESS_WINDOW_MS) {
@@ -124,6 +129,7 @@ class LivePlayerActivity : BaseActivity() {
             object : Player.Listener {
                 override fun onPlayerError(error: PlaybackException) {
                     AppLog.e("LivePlayer", "onPlayerError", error)
+                    if (tryAutoFailoverOnError(error)) return
                     Toast.makeText(this@LivePlayerActivity, "播放失败：${error.errorCodeName}", Toast.LENGTH_SHORT).show()
                 }
 
@@ -195,6 +201,8 @@ class LivePlayerActivity : BaseActivity() {
         messageClient?.close()
         messageClient = null
         debugJob?.cancel()
+        autoFailoverJob?.cancel()
+        autoFailoverInFlight = false
         autoHideJob?.cancel()
         binding.playerView.player = null
         val releaseStart = SystemClock.elapsedRealtime()
@@ -486,6 +494,68 @@ class LivePlayerActivity : BaseActivity() {
         }
     }
 
+    private fun shouldAutoFailoverOnError(error: PlaybackException): Boolean {
+        // Limit to IO/network errors where switching CDN host is likely to help.
+        return when (error.errorCode) {
+            PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
+            PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
+            -> true
+            else -> false
+        }
+    }
+
+    private fun tryAutoFailoverOnError(error: PlaybackException): Boolean {
+        if (!shouldAutoFailoverOnError(error)) return false
+        if (isFinishing || isDestroyed) return false
+        if (autoFailoverInFlight) return false
+
+        val play = lastPlay ?: return false
+        val lines = play.lines
+        if (lines.size <= 1) return false
+
+        val nowMs = SystemClock.elapsedRealtime()
+        if (autoFailoverWindowStartAtMs <= 0L || nowMs - autoFailoverWindowStartAtMs > AUTO_FAILOVER_WINDOW_MS) {
+            autoFailoverWindowStartAtMs = nowMs
+            autoFailoverSwitchCount = 0
+        }
+        if (nowMs - autoFailoverLastSwitchAtMs < AUTO_FAILOVER_MIN_INTERVAL_MS) return false
+
+        // Avoid endless loops if the room is not playable (region/permission/not live).
+        val maxSwitches = (lines.size - 1).coerceIn(1, AUTO_FAILOVER_MAX_SWITCHES)
+        if (autoFailoverSwitchCount >= maxSwitches) return false
+
+        val currentIndex = (session.lineOrder - 1).coerceIn(0, lines.lastIndex)
+        val nextIndex = (currentIndex + 1) % lines.size
+        if (nextIndex == currentIndex) return false
+
+        val fromOrder = lines[currentIndex].order
+        val toOrder = lines[nextIndex].order
+        AppLog.w("LivePlayer", "autoFailover error=${error.errorCodeName} line=$fromOrder -> $toOrder")
+
+        autoFailoverSwitchCount += 1
+        autoFailoverLastSwitchAtMs = nowMs
+        autoFailoverInFlight = true
+        autoFailoverJob?.cancel()
+
+        // Stop current load attempts to avoid duplicate error callbacks while we are switching.
+        runCatching { player?.stop() }
+
+        session = session.copy(lineOrder = nextIndex + 1)
+        refreshSettings()
+        Toast.makeText(this, "线路 $fromOrder 失败，尝试线路 $toOrder", Toast.LENGTH_SHORT).show()
+
+        autoFailoverJob =
+            lifecycleScope.launch {
+                try {
+                    loadAndPlay(initial = false)
+                } finally {
+                    autoFailoverInFlight = false
+                }
+            }
+        return true
+    }
+
     private suspend fun loadAndPlay(initial: Boolean) {
         val exo = player ?: return
         try {
@@ -503,6 +573,11 @@ class LivePlayerActivity : BaseActivity() {
             val qn = session.targetQn.takeIf { it > 0 } ?: 150
             val play = BiliApi.livePlayUrl(realRoomId, qn)
             lastPlay = play
+            if (play.lines.isNotEmpty()) {
+                // If saved lineOrder becomes out of range (API may return fewer lines), fall back to line 1.
+                val safeLineOrder = session.lineOrder.takeIf { it in 1..play.lines.size } ?: 1
+                if (safeLineOrder != session.lineOrder) session = session.copy(lineOrder = safeLineOrder)
+            }
             refreshSettings()
 
             val pickedLine =
@@ -722,5 +797,8 @@ class LivePlayerActivity : BaseActivity() {
         private const val LIVE_QN_ORIGINAL = 10_000
         private const val AUTO_HIDE_MS = 4_000L
         private const val BACK_DOUBLE_PRESS_WINDOW_MS = 1_500L
+        private const val AUTO_FAILOVER_WINDOW_MS = 12_000L
+        private const val AUTO_FAILOVER_MIN_INTERVAL_MS = 1_200L
+        private const val AUTO_FAILOVER_MAX_SWITCHES = 4
     }
 }

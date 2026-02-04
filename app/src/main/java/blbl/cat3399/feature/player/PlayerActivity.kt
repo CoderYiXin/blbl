@@ -99,6 +99,7 @@ class PlayerActivity : BaseActivity() {
     private var finishOnBackKeyUp: Boolean = false
     private var holdPrevSpeed: Float = 1.0f
     private var holdPrevPlayWhenReady: Boolean = false
+    private var holdScrubPreviewPosMs: Long? = null
     private var loadJob: kotlinx.coroutines.Job? = null
     private var lastEndedActionAtMs: Long = 0L
     private var playbackUncaughtHandler: CoroutineExceptionHandler? = null
@@ -1712,7 +1713,8 @@ class PlayerActivity : BaseActivity() {
                 if (event.repeatCount > 0) {
                     showSeekOsd()
                     clearKeySeekPending()
-                    startHoldSeek(direction = -1, showControls = false)
+                    // Long-press LEFT: always do preview-scrub rewind.
+                    startHoldScrub(direction = -1, showControls = false)
                     return true
                 }
 
@@ -2010,11 +2012,15 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun seekRelative(deltaMs: Long) {
+        seekRelative(deltaMs, danmakuImmediate = true)
+    }
+
+    private fun seekRelative(deltaMs: Long, danmakuImmediate: Boolean) {
         val exo = player ?: return
         val duration = exo.duration.takeIf { it > 0 } ?: Long.MAX_VALUE
         val next = (exo.currentPosition + deltaMs).coerceIn(0L, duration)
         exo.seekTo(next)
-        requestDanmakuSegmentsForPosition(next, immediate = true)
+        requestDanmakuSegmentsForPosition(next, immediate = danmakuImmediate)
     }
 
     private fun startProgressLoop() {
@@ -2060,26 +2066,62 @@ class PlayerActivity : BaseActivity() {
             return
         }
 
-        player?.let { exo ->
-            val duration = exo.duration.takeIf { it > 0 } ?: 0L
-            val pos = exo.currentPosition.coerceAtLeast(0L)
-            binding.tvSeekOsdTime.text = "${formatHms(pos)} / ${formatHms(duration)}"
+        val exo = player
+        if (exo != null) {
+            val duration = exo.duration.takeIf { it > 0 } ?: currentViewDurationMs ?: 0L
+            // During hold-scrub we may have a preview position that should always win.
+            // Do NOT gate on `scrubbing` here: other scrub-related flows may temporarily toggle it,
+            // which would cause the OSD progress bar to jump between preview and actual position.
+            val pos = (holdScrubPreviewPosMs ?: exo.currentPosition).coerceAtLeast(0L)
+            val bufPos = exo.bufferedPosition.coerceAtLeast(0L)
+            showSeekOsd(posMs = pos, durationMs = duration, bufferedPosMs = bufPos)
+            return
+        }
 
+        transientSeekOsdVisible = true
+        updatePersistentBottomProgressBarVisibility()
+        scheduleHideSeekOsd()
+    }
+
+    private fun showSeekOsd(posMs: Long, durationMs: Long, bufferedPosMs: Long) {
+        if (binding.settingsPanel.visibility == View.VISIBLE) return
+        val duration = durationMs.coerceAtLeast(0L)
+        val pos = posMs.coerceAtLeast(0L)
+        val bufPos = bufferedPosMs.coerceAtLeast(0L)
+
+        if (osdMode == OsdMode.Full) {
+            // Full OSD: update the real SeekBar + time (useful for hold-scrub preview).
+            binding.tvTime.text = "${formatHms(pos)} / ${formatHms(duration)}"
             val enabled = duration > 0L
-            binding.progressSeekOsd.isEnabled = enabled
+            binding.seekProgress.isEnabled = enabled
             if (enabled) {
-                val bufPos = exo.bufferedPosition.coerceAtLeast(0L)
                 val bufferedProgress =
                     ((bufPos.toDouble() / duration.toDouble()) * SEEK_MAX)
                         .toInt()
                         .coerceIn(0, SEEK_MAX)
                 val pNow = ((pos.toDouble() / duration.toDouble()) * SEEK_MAX).toInt().coerceIn(0, SEEK_MAX)
-                binding.progressSeekOsd.secondaryProgress = bufferedProgress
-                binding.progressSeekOsd.progress = pNow
-            } else {
-                binding.progressSeekOsd.secondaryProgress = 0
-                binding.progressSeekOsd.progress = 0
+                binding.seekProgress.secondaryProgress = bufferedProgress
+                binding.seekProgress.progress = pNow
             }
+            noteUserInteraction()
+            return
+        }
+
+        binding.tvSeekOsdTime.text = "${formatHms(pos)} / ${formatHms(duration)}"
+
+        val enabled = duration > 0L
+        binding.progressSeekOsd.isEnabled = enabled
+        if (enabled) {
+            val bufferedProgress =
+                ((bufPos.toDouble() / duration.toDouble()) * SEEK_MAX)
+                    .toInt()
+                    .coerceIn(0, SEEK_MAX)
+            val pNow = ((pos.toDouble() / duration.toDouble()) * SEEK_MAX).toInt().coerceIn(0, SEEK_MAX)
+            binding.progressSeekOsd.secondaryProgress = bufferedProgress
+            binding.progressSeekOsd.progress = pNow
+        } else {
+            binding.progressSeekOsd.secondaryProgress = 0
+            binding.progressSeekOsd.progress = 0
         }
 
         transientSeekOsdVisible = true
@@ -2455,7 +2497,12 @@ class PlayerActivity : BaseActivity() {
                 if (keySeekPendingKeyCode != keyCode || keySeekPendingDirection != direction) return@launch
                 if (holdSeekJob != null) return@launch
                 showSeekOsd()
-                startHoldSeek(direction = direction, showControls = showControls)
+                if (direction < 0) {
+                    // Long-press LEFT: always use preview-scrub rewind (independent of hold-seek mode setting).
+                    startHoldScrub(direction = direction, showControls = showControls)
+                } else {
+                    startHoldSeek(direction = direction, showControls = showControls)
+                }
                 // Once we enter hold, a later ACTION_UP should only stop the hold (no step seek).
                 clearKeySeekPending()
             }
@@ -2496,6 +2543,8 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun startHoldSeek(direction: Int, showControls: Boolean) {
+        // Speed-hold seek is forward-only; long-press LEFT is handled by preview-scrub (startHoldScrub).
+        if (direction <= 0) return
         if (holdSeekJob?.isActive == true) return
         val exo = player ?: return
 
@@ -2505,35 +2554,98 @@ class PlayerActivity : BaseActivity() {
             noteUserInteraction()
         }
 
+        val holdSpeed = holdSeekSpeed()
+        val holdMode = BiliClient.prefs.playerHoldSeekMode
         holdPrevSpeed = exo.playbackParameters.speed
         holdPrevPlayWhenReady = exo.playWhenReady
-        if (direction > 0) {
-            showSeekHoldHint(direction)
-            exo.setPlaybackSpeed(HOLD_SPEED)
+        holdScrubPreviewPosMs = null
+        if (holdMode == AppPrefs.PLAYER_HOLD_SEEK_MODE_SCRUB) {
+            startHoldScrubSeek(exo = exo, direction = direction, speed = holdSpeed)
+            return
+        }
+        showSeekHoldHint(direction, holdSpeed)
+        exo.setPlaybackSpeed(holdSpeed)
+        exo.playWhenReady = true
+        holdSeekJob = lifecycleScope.launch { kotlinx.coroutines.awaitCancellation() }
+    }
+
+    private fun startHoldScrub(direction: Int, showControls: Boolean) {
+        if (holdSeekJob?.isActive == true) return
+        val exo = player ?: return
+
+        if (showControls) {
+            if (osdMode != OsdMode.Full && binding.settingsPanel.visibility != View.VISIBLE) setControlsVisible(true) else noteUserInteraction()
+        } else {
+            noteUserInteraction()
+        }
+
+        val holdSpeed = holdSeekSpeed()
+        holdPrevSpeed = exo.playbackParameters.speed
+        holdPrevPlayWhenReady = exo.playWhenReady
+        holdScrubPreviewPosMs = null
+        startHoldScrubSeek(exo = exo, direction = direction, speed = holdSpeed)
+    }
+
+    private fun startHoldScrubSeek(exo: ExoPlayer, direction: Int, speed: Float) {
+        val duration = exo.duration.takeIf { it > 0 } ?: currentViewDurationMs ?: 0L
+        if (duration <= 0L) {
+            // Unknown duration: cannot show an actual progress bar scrub; fall back to speed-hold.
+            if (direction <= 0) return
+            showSeekHoldHint(direction, speed)
+            exo.setPlaybackSpeed(speed)
             exo.playWhenReady = true
             holdSeekJob = lifecycleScope.launch { kotlinx.coroutines.awaitCancellation() }
             return
         }
 
-        // Rewind: ExoPlayer has no negative playback speed; do stepped rewind while paused.
-        showSeekHoldHint(direction)
+        scrubbing = true
+        keyScrubEndJob?.cancel()
+        keyScrubEndJob = null
+
         exo.pause()
+
+        val initial = exo.currentPosition.coerceIn(0L, duration)
+        holdScrubPreviewPosMs = initial
+        showSeekOsd(posMs = initial, durationMs = duration, bufferedPosMs = exo.bufferedPosition)
+
+        val tickMs = HOLD_SCRUB_TICK_MS
+        // Always use the "scrub progress bar" algorithm for preview scrubbing
+        // (both LEFT and RIGHT directions), independent of the hold-seek mode setting.
+        val stepMs = holdScrubStepMs(durationMs = duration, tickMs = tickMs).coerceAtLeast(1L)
+        val deltaMs = stepMs * direction.toLong()
         holdSeekJob =
             lifecycleScope.launch {
                 while (isActive) {
-                    seekRelative(-HOLD_REWIND_STEP_MS)
-                    delay(HOLD_REWIND_TICK_MS)
+                    val current = holdScrubPreviewPosMs ?: initial
+                    val next = (current + deltaMs).coerceIn(0L, duration)
+                    holdScrubPreviewPosMs = next
+                    showSeekOsd(posMs = next, durationMs = duration, bufferedPosMs = exo.bufferedPosition)
+                    delay(tickMs)
                 }
             }
     }
 
     private fun stopHoldSeek() {
         val exo = player
+        val scrubTarget = holdScrubPreviewPosMs
+        holdScrubPreviewPosMs = null
+        if (scrubTarget != null) {
+            scrubbing = false
+            keyScrubEndJob?.cancel()
+            keyScrubEndJob = null
+        }
         holdSeekJob?.cancel()
         holdSeekJob = null
         if (exo != null) {
             exo.setPlaybackSpeed(holdPrevSpeed)
+            if (scrubTarget != null) {
+                exo.seekTo(scrubTarget)
+                val duration = exo.duration.takeIf { it > 0 } ?: currentViewDurationMs ?: 0L
+                if (duration > 0L) showSeekOsd(posMs = scrubTarget, durationMs = duration, bufferedPosMs = exo.bufferedPosition)
+            }
             exo.playWhenReady = holdPrevPlayWhenReady
+            val pos = (scrubTarget ?: exo.currentPosition).coerceAtLeast(0L)
+            requestDanmakuSegmentsForPosition(pos, immediate = true)
         }
         scheduleHideSeekHint()
     }
@@ -2544,9 +2656,38 @@ class PlayerActivity : BaseActivity() {
         showSeekHint(text, hold = false)
     }
 
-    private fun showSeekHoldHint(direction: Int) {
-        val text = if (direction > 0) "快进 x2" else "后退 x2"
+    private fun showSeekHoldHint(direction: Int, speed: Float) {
+        val s = holdSeekSpeedText(speed)
+        val text = if (direction > 0) "快进 x$s" else "后退 x$s"
         showSeekHint(text, hold = true)
+    }
+
+    private fun holdSeekSpeed(): Float {
+        val v = BiliClient.prefs.playerHoldSeekSpeed
+        val fallback = AppPrefs.PLAYER_HOLD_SEEK_SPEED_DEFAULT
+        if (!v.isFinite()) return fallback
+        return v.coerceIn(1.5f, 4.0f)
+    }
+
+    private fun holdSeekSpeedText(speed: Float): String {
+        val v = speed.takeIf { it.isFinite() } ?: AppPrefs.PLAYER_HOLD_SEEK_SPEED_DEFAULT
+        val fixed = String.format(Locale.US, "%.2f", v)
+        return fixed.trimEnd('0').trimEnd('.')
+    }
+
+    private fun holdScrubStepMs(durationMs: Long, tickMs: Long): Long {
+        val duration = durationMs.coerceAtLeast(0L)
+        if (duration <= 0L) return 0L
+        val tick = tickMs.coerceAtLeast(1L)
+        val step =
+            if (duration < HOLD_SCRUB_SHORT_VIDEO_THRESHOLD_MS) {
+                // Short videos: fixed speed (independent of hold seek speed).
+                (HOLD_SCRUB_SHORT_SPEED_MS_PER_S.toDouble() * tick.toDouble() / 1000.0).roundToInt().toLong()
+            } else {
+                // Long videos: traverse from 0% -> 100% in about HOLD_SCRUB_TRAVERSE_MS.
+                (duration.toDouble() * tick.toDouble() / HOLD_SCRUB_TRAVERSE_MS.toDouble()).roundToInt().toLong()
+            }
+        return step.coerceAtLeast(1L)
     }
 
     private fun showSeekHint(text: String, hold: Boolean) {
@@ -2607,11 +2748,13 @@ class PlayerActivity : BaseActivity() {
 
     private fun updateProgressUi() {
         val exo = player ?: return
-        val duration = exo.duration.takeIf { it > 0 } ?: 0L
+        val duration = exo.duration.takeIf { it > 0 } ?: currentViewDurationMs ?: 0L
         val pos = exo.currentPosition.coerceAtLeast(0L)
+        val uiPos = holdScrubPreviewPosMs ?: pos
         val bufPos = exo.bufferedPosition.coerceAtLeast(0L)
 
-        if (!scrubbing) {
+        val uiScrubbing = scrubbing || holdScrubPreviewPosMs != null
+        if (!uiScrubbing) {
             binding.tvTime.text = "${formatHms(pos)} / ${formatHms(duration)}"
             binding.tvSeekOsdTime.text = "${formatHms(pos)} / ${formatHms(duration)}"
         }
@@ -2629,11 +2772,11 @@ class PlayerActivity : BaseActivity() {
             binding.progressPersistentBottom.secondaryProgress = bufferedProgress
             binding.progressSeekOsd.secondaryProgress = bufferedProgress
 
-            if (!scrubbing) {
+            if (!uiScrubbing) {
                 val p = ((pos.toDouble() / duration.toDouble()) * SEEK_MAX).toInt().coerceIn(0, SEEK_MAX)
                 binding.seekProgress.progress = p
             }
-            val pNow = ((pos.toDouble() / duration.toDouble()) * SEEK_MAX).toInt().coerceIn(0, SEEK_MAX)
+            val pNow = ((uiPos.toDouble() / duration.toDouble()) * SEEK_MAX).toInt().coerceIn(0, SEEK_MAX)
             binding.progressPersistentBottom.progress = pNow
             binding.progressSeekOsd.progress = pNow
         } else {
@@ -4040,9 +4183,10 @@ class PlayerActivity : BaseActivity() {
         private const val EDGE_TAP_THRESHOLD = 0.4f
         private const val TAP_SEEK_ACTIVE_MS = 1_200L
         private const val SMART_SEEK_WINDOW_MS = 900L
-        private const val HOLD_SPEED = 2.0f
-        private const val HOLD_REWIND_TICK_MS = 260L
-        private const val HOLD_REWIND_STEP_MS = 520L
+        private const val HOLD_SCRUB_TICK_MS = 120L
+        private const val HOLD_SCRUB_TRAVERSE_MS = 20_000L
+        private const val HOLD_SCRUB_SHORT_VIDEO_THRESHOLD_MS = 40_000L
+        private const val HOLD_SCRUB_SHORT_SPEED_MS_PER_S = 4_000L
         private const val BACK_DOUBLE_PRESS_WINDOW_MS = 1_500L
         private const val SEEK_HINT_HIDE_DELAY_MS = 900L
         private const val SEEK_OSD_HIDE_DELAY_MS = 1_500L

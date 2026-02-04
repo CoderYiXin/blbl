@@ -137,6 +137,38 @@ class AppPrefs(context: Context) {
         get() = prefs.getFloat(KEY_PLAYER_SPEED, 1.0f)
         set(value) = prefs.edit().putFloat(KEY_PLAYER_SPEED, value).apply()
 
+    var playerHoldSeekSpeed: Float
+        get() {
+            val v = prefs.getFloat(KEY_PLAYER_HOLD_SEEK_SPEED, PLAYER_HOLD_SEEK_SPEED_DEFAULT)
+            if (!v.isFinite()) return PLAYER_HOLD_SEEK_SPEED_DEFAULT
+            return v.coerceIn(1.5f, 4.0f)
+        }
+        set(value) = prefs.edit().putFloat(KEY_PLAYER_HOLD_SEEK_SPEED, value.coerceIn(1.5f, 4.0f)).apply()
+
+    var playerHoldSeekMode: String
+        get() {
+            val raw = prefs.getString(KEY_PLAYER_HOLD_SEEK_MODE, PLAYER_HOLD_SEEK_MODE_SPEED) ?: PLAYER_HOLD_SEEK_MODE_SPEED
+            val v = raw.trim()
+            return when (v) {
+                PLAYER_HOLD_SEEK_MODE_SPEED,
+                PLAYER_HOLD_SEEK_MODE_SCRUB,
+                -> v
+
+                else -> PLAYER_HOLD_SEEK_MODE_SPEED
+            }
+        }
+        set(value) {
+            val v =
+                when (value) {
+                    PLAYER_HOLD_SEEK_MODE_SPEED,
+                    PLAYER_HOLD_SEEK_MODE_SCRUB,
+                    -> value
+
+                    else -> PLAYER_HOLD_SEEK_MODE_SPEED
+                }
+            prefs.edit().putString(KEY_PLAYER_HOLD_SEEK_MODE, v).apply()
+        }
+
     var playerAutoResumeEnabled: Boolean
         get() = prefs.getBoolean(KEY_PLAYER_AUTO_RESUME_ENABLED, true)
         set(value) = prefs.edit().putBoolean(KEY_PLAYER_AUTO_RESUME_ENABLED, value).apply()
@@ -303,6 +335,8 @@ class AppPrefs(context: Context) {
         private const val KEY_SUBTITLE_LANG = "subtitle_lang"
         private const val KEY_SUBTITLE_ENABLED_DEFAULT = "subtitle_enabled_default"
         private const val KEY_PLAYER_SPEED = "player_speed"
+        private const val KEY_PLAYER_HOLD_SEEK_SPEED = "player_hold_seek_speed"
+        private const val KEY_PLAYER_HOLD_SEEK_MODE = "player_hold_seek_mode"
         private const val KEY_PLAYER_AUTO_RESUME_ENABLED = "player_auto_resume_enabled"
         private const val KEY_PLAYER_AUTO_SKIP_SEGMENTS_ENABLED = "player_auto_skip_segments_enabled"
         private const val KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY = "player_open_detail_before_play"
@@ -332,6 +366,10 @@ class AppPrefs(context: Context) {
         const val PLAYER_PLAYBACK_MODE_RECOMMEND = "recommend"
         const val PLAYER_PLAYBACK_MODE_NONE = "none"
         const val PLAYER_PLAYBACK_MODE_EXIT = "exit"
+
+        const val PLAYER_HOLD_SEEK_MODE_SPEED = "speed"
+        const val PLAYER_HOLD_SEEK_MODE_SCRUB = "scrub"
+        const val PLAYER_HOLD_SEEK_SPEED_DEFAULT = 3.0f
 
         const val PLAYER_ACTION_BTN_LIKE = "like"
         const val PLAYER_ACTION_BTN_COIN = "coin"
