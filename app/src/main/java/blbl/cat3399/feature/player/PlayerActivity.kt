@@ -29,6 +29,7 @@ import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DataSource
 import androidx.media3.datasource.DataSpec
 import androidx.media3.datasource.TransferListener
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DecoderReuseEvaluation
 import androidx.media3.exoplayer.ExoPlayer
@@ -194,6 +195,11 @@ class PlayerActivity : BaseActivity() {
     private var currentViewDurationMs: Long? = null
     private var exitCleanupRequested: Boolean = false
     private var exitCleanupReason: String? = null
+    private var decoderReleaseRequestedOnStopReason: String? = null
+    private var resumeAfterDecoderRelease: Boolean = false
+    private var resumeAfterDecoderReleasePositionMs: Long = 0L
+    private var resumeExpiredUrlReloadArmed: Boolean = false
+    private var resumeExpiredUrlReloadAttempted: Boolean = false
 
     private class PlaybackTrace(private val id: String) {
         private val startMs = SystemClock.elapsedRealtime()
@@ -212,6 +218,33 @@ class PlayerActivity : BaseActivity() {
 
     private var trace: PlaybackTrace? = null
     private var traceFirstFrameLogged: Boolean = false
+
+    private fun requestDecoderReleaseOnStop(reason: String) {
+        if (reason.isBlank()) return
+        decoderReleaseRequestedOnStopReason = reason
+        trace?.log("exo:releaseOnStop:request", "reason=$reason")
+    }
+
+    private fun releaseDecoderNowForBackground(reason: String) {
+        val exo = player ?: return
+        if (exitCleanupRequested || isFinishing || isDestroyed) return
+        val pos = exo.currentPosition.coerceAtLeast(0L)
+        trace?.log("exo:releaseOnStop:do", "reason=$reason pos=${pos}ms")
+
+        // Stop progress reporting before stopping the player (stop() resets currentPosition).
+        stopReportProgressLoop(flush = false, reason = "nav_$reason")
+        enqueueExitProgressReport(reason = "nav_$reason")
+
+        resumeAfterDecoderRelease = true
+        resumeAfterDecoderReleasePositionMs = pos
+
+        // Detach the surface early so codecs can be released immediately.
+        if (::binding.isInitialized) {
+            binding.playerView.player = null
+        }
+        exo.playWhenReady = false
+        exo.stop()
+    }
 
     private fun requestExitCleanup(reason: String) {
         if (exitCleanupRequested) return
@@ -409,7 +442,9 @@ class PlayerActivity : BaseActivity() {
         exo.addListener(object : Player.Listener {
             override fun onPlayerError(error: PlaybackException) {
                 AppLog.e("Player", "onPlayerError", error)
-                trace?.log("exo:error", "type=${error.errorCodeName}")
+                val httpCode = findHttpResponseCode(error)
+                trace?.log("exo:error", "type=${error.errorCodeName} http=${httpCode ?: -1}")
+                if (maybeReloadExpiredUrlAfterResume(error, httpCode)) return
                 val picked = lastPickedDash
                 if (
                     picked != null &&
@@ -457,6 +492,10 @@ class PlayerActivity : BaseActivity() {
                     debug.rebufferCount++
                 }
                 debug.lastPlaybackState = playbackState
+                if (playbackState == Player.STATE_READY && resumeExpiredUrlReloadArmed) {
+                    resumeExpiredUrlReloadArmed = false
+                    trace?.log("exo:resumeReload:disarm", "state=READY")
+                }
                 if (playbackState == Player.STATE_ENDED) {
                     stopReportProgressLoop(flush = true, reason = "ended")
                     handlePlaybackEnded(exo)
@@ -1781,10 +1820,37 @@ class PlayerActivity : BaseActivity() {
 
     override fun onStop() {
         trace?.log("activity:onStop")
+        val releaseReason = decoderReleaseRequestedOnStopReason
+        decoderReleaseRequestedOnStopReason = null
         super.onStop()
         player?.pause()
-        val flush = !isFinishing && !isChangingConfigurations && !exitCleanupRequested
-        stopReportProgressLoop(flush = flush, reason = if (flush) "stop" else "stop_skip")
+        if (releaseReason != null && !isChangingConfigurations) {
+            releaseDecoderNowForBackground(reason = releaseReason)
+        } else {
+            val flush = !isFinishing && !isChangingConfigurations && !exitCleanupRequested
+            stopReportProgressLoop(flush = flush, reason = if (flush) "stop" else "stop_skip")
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        val exo = player ?: return
+        if (!resumeAfterDecoderRelease) return
+        if (exitCleanupRequested || isFinishing || isDestroyed) return
+
+        val pos = resumeAfterDecoderReleasePositionMs.coerceAtLeast(0L)
+        resumeAfterDecoderRelease = false
+        resumeAfterDecoderReleasePositionMs = 0L
+        trace?.log("exo:releaseOnStop:resume", "pos=${pos}ms")
+
+        if (::binding.isInitialized && binding.playerView.player == null) {
+            binding.playerView.player = exo
+        }
+        resumeExpiredUrlReloadArmed = true
+        resumeExpiredUrlReloadAttempted = false
+        exo.playWhenReady = false
+        exo.prepare()
+        if (pos > 0L) exo.seekTo(pos)
     }
 
     override fun onPause() {
@@ -1946,6 +2012,9 @@ class PlayerActivity : BaseActivity() {
                 Toast.makeText(this, "未获取到 UP 主信息", Toast.LENGTH_SHORT).show()
                 return@setOnClickListener
             }
+            // When jumping into the UP video list and potentially starting another PlayerActivity,
+            // release decoder resources from the current player to avoid `ERROR_CODE_DECODER_INIT_FAILED`.
+            requestDecoderReleaseOnStop(reason = "up_detail")
             startActivity(
                 Intent(this, UpDetailActivity::class.java)
                     .putExtra(UpDetailActivity.EXTRA_MID, mid)
@@ -3395,6 +3464,35 @@ class PlayerActivity : BaseActivity() {
         return name.contains("DECOD") || name.contains("DECODER") || name.contains("FORMAT")
     }
 
+    private fun maybeReloadExpiredUrlAfterResume(error: PlaybackException, httpCode: Int?): Boolean {
+        if (!resumeExpiredUrlReloadArmed) return false
+        if (resumeExpiredUrlReloadAttempted) return false
+        if (!isLikelyExpiredUrlError(error, httpCode)) return false
+        resumeExpiredUrlReloadAttempted = true
+        resumeExpiredUrlReloadArmed = false
+        trace?.log("exo:resumeReload", "http=${httpCode ?: -1} type=${error.errorCodeName}")
+        Toast.makeText(this@PlayerActivity, "播放地址已过期，正在刷新…", Toast.LENGTH_SHORT).show()
+        reloadStream(keepPosition = true, resetConstraints = false, autoPlay = false)
+        return true
+    }
+
+    private fun isLikelyExpiredUrlError(error: PlaybackException, httpCode: Int?): Boolean {
+        if (httpCode != null && httpCode in setOf(403, 404, 410)) return true
+        if (error.errorCode != PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS) return false
+        val msg = (error.cause?.message ?: error.message ?: "").lowercase(Locale.US)
+        return msg.contains("403") || msg.contains("404") || msg.contains("410") || msg.contains("forbidden")
+    }
+
+    private fun findHttpResponseCode(t: Throwable?): Int? {
+        var cur = t ?: return null
+        repeat(12) {
+            val code = (cur as? HttpDataSource.InvalidResponseCodeException)?.responseCode
+            if (code != null) return code
+            cur = cur.cause ?: return null
+        }
+        return null
+    }
+
     private val deviceSupportsDolbyVision: Boolean by lazy {
         hasDecoder(MimeTypes.VIDEO_DOLBY_VISION)
     }
@@ -3739,7 +3837,7 @@ class PlayerActivity : BaseActivity() {
         return DefaultMediaSourceFactory(DefaultDataSource.Factory(this, factory)).createMediaSource(item)
     }
 
-    internal fun reloadStream(keepPosition: Boolean, resetConstraints: Boolean = true) {
+    internal fun reloadStream(keepPosition: Boolean, resetConstraints: Boolean = true, autoPlay: Boolean = true) {
         val exo = player ?: return
         val cid = currentCid
         val bvid = currentBvid
@@ -3797,7 +3895,7 @@ class PlayerActivity : BaseActivity() {
                 exo.prepare()
                 applySubtitleEnabled(exo)
                 if (keepPosition) exo.seekTo(pos)
-                exo.playWhenReady = true
+                exo.playWhenReady = autoPlay
             } catch (t: Throwable) {
                 AppLog.e("Player", "reloadStream failed", t)
                 if (!handlePlayUrlErrorIfNeeded(t)) {
