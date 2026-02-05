@@ -6,14 +6,6 @@
             <solid android:color="#26FFFFFF" />
         </shape>
     </item>
-    <item android:id="@android:id/secondaryProgress">
-        <clip>
-            <shape android:shape="rectangle">
-                <size android:height="@dimen/player_persistent_progress_height" />
-                <solid android:color="#2CFFFFFF" />
-            </shape>
-        </clip>
-    </item>
     <item android:id="@android:id/progress">
         <clip>
             <shape android:shape="rectangle">
