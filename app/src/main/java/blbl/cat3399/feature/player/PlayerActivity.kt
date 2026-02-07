@@ -940,7 +940,7 @@ class PlayerActivity : BaseActivity() {
                 }
                 if (osdMode == OsdMode.Hidden) {
                     setControlsVisible(true)
-                    focusFirstControl()
+                    focusDownKeyOsdTargetControl()
                     return true
                 }
             }

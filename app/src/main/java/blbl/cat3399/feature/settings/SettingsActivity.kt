@@ -285,6 +285,7 @@ class SettingsActivity : BaseActivity() {
                 SettingEntry("点赞投币收藏是否显示", playerActionButtonsText(prefs.playerActionButtons), null),
                 SettingEntry("显示视频调试信息", if (prefs.playerDebugEnabled) "开" else "关", null),
                 SettingEntry("按两次退出键才退出播放器", if (prefs.playerDoubleBackToExit) "开" else "关", null),
+                SettingEntry("下键呼出OSD后焦点", downKeyOsdFocusTargetText(prefs.playerDownKeyOsdFocusTarget), null),
                 SettingEntry("底部常驻进度条", if (prefs.playerPersistentBottomProgressEnabled) "开" else "关", null),
             )
 
@@ -765,6 +766,35 @@ class SettingsActivity : BaseActivity() {
             "按两次退出键才退出播放器" -> {
                 prefs.playerDoubleBackToExit = !prefs.playerDoubleBackToExit
                 refreshSection(entry.title)
+            }
+
+            "下键呼出OSD后焦点" -> {
+                val options =
+                    listOf(
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE to "播放/暂停",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_PREV to "上一个",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_NEXT to "下一个",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE to "字幕",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU to "弹幕",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_UP to "UP主",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_LIKE to "点赞",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_COIN to "投币",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_FAV to "收藏",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_RECOMMEND to "推荐视频",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_PLAYLIST to "播放列表",
+                        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED to "更多设置",
+                    )
+                showChoiceDialog(
+                    title = "下键呼出OSD后焦点",
+                    items = options.map { it.second },
+                    current = downKeyOsdFocusTargetText(prefs.playerDownKeyOsdFocusTarget),
+                ) { selected ->
+                    val value =
+                        options.firstOrNull { it.second == selected }?.first
+                            ?: blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE
+                    prefs.playerDownKeyOsdFocusTarget = value
+                    refreshSection(entry.title)
+                }
             }
 
             "底部常驻进度条" -> {
@@ -1439,6 +1469,21 @@ class SettingsActivity : BaseActivity() {
     private fun holdSeekModeText(code: String): String = when (code) {
         blbl.cat3399.core.prefs.AppPrefs.PLAYER_HOLD_SEEK_MODE_SCRUB -> "拖动进度条"
         else -> "倍率加速"
+    }
+
+    private fun downKeyOsdFocusTargetText(code: String): String = when (code) {
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_PREV -> "上一个"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_NEXT -> "下一个"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE -> "字幕"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU -> "弹幕"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_UP -> "UP主"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_LIKE -> "点赞"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_COIN -> "投币"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_FAV -> "收藏"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_RECOMMEND -> "推荐视频"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_PLAYLIST -> "播放列表"
+        blbl.cat3399.core.prefs.AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED -> "更多设置"
+        else -> "播放/暂停"
     }
 
     private fun playerActionButtonsText(buttons: List<String>): String {

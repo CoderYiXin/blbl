@@ -215,6 +215,52 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_PLAYER_DOUBLE_BACK_TO_EXIT, true)
         set(value) = prefs.edit().putBoolean(KEY_PLAYER_DOUBLE_BACK_TO_EXIT, value).apply()
 
+    var playerDownKeyOsdFocusTarget: String
+        get() {
+            val raw =
+                prefs.getString(KEY_PLAYER_DOWN_KEY_OSD_FOCUS_TARGET, PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE)
+                    ?: PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE
+            val value = raw.trim()
+            return when (value) {
+                PLAYER_DOWN_KEY_OSD_FOCUS_PREV,
+                PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE,
+                PLAYER_DOWN_KEY_OSD_FOCUS_NEXT,
+                PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE,
+                PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU,
+                PLAYER_DOWN_KEY_OSD_FOCUS_UP,
+                PLAYER_DOWN_KEY_OSD_FOCUS_LIKE,
+                PLAYER_DOWN_KEY_OSD_FOCUS_COIN,
+                PLAYER_DOWN_KEY_OSD_FOCUS_FAV,
+                PLAYER_DOWN_KEY_OSD_FOCUS_RECOMMEND,
+                PLAYER_DOWN_KEY_OSD_FOCUS_PLAYLIST,
+                PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED,
+                -> value
+
+                else -> PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE
+            }
+        }
+        set(value) {
+            val next =
+                when (value) {
+                    PLAYER_DOWN_KEY_OSD_FOCUS_PREV,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_NEXT,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_UP,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_LIKE,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_COIN,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_FAV,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_RECOMMEND,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_PLAYLIST,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED,
+                    -> value
+
+                    else -> PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE
+                }
+            prefs.edit().putString(KEY_PLAYER_DOWN_KEY_OSD_FOCUS_TARGET, next).apply()
+        }
+
     var playerPersistentBottomProgressEnabled: Boolean
         get() = prefs.getBoolean(KEY_PLAYER_PERSISTENT_BOTTOM_PROGRESS, false)
         set(value) = prefs.edit().putBoolean(KEY_PLAYER_PERSISTENT_BOTTOM_PROGRESS, value).apply()
@@ -368,6 +414,7 @@ class AppPrefs(context: Context) {
         private const val KEY_TAB_SWITCH_FOLLOWS_FOCUS = "tab_switch_follows_focus"
         private const val KEY_PLAYER_DEBUG = "player_debug_enabled"
         private const val KEY_PLAYER_DOUBLE_BACK_TO_EXIT = "player_double_back_on_ended"
+        private const val KEY_PLAYER_DOWN_KEY_OSD_FOCUS_TARGET = "player_down_key_osd_focus_target"
         private const val KEY_PLAYER_PERSISTENT_BOTTOM_PROGRESS = "player_persistent_bottom_progress"
         private const val KEY_PLAYER_PLAYBACK_MODE = "player_playback_mode"
         private const val KEY_PLAYER_ACTION_BUTTONS = "player_action_buttons"
@@ -399,6 +446,19 @@ class AppPrefs(context: Context) {
         const val PLAYER_ACTION_BTN_LIKE = "like"
         const val PLAYER_ACTION_BTN_COIN = "coin"
         const val PLAYER_ACTION_BTN_FAV = "fav"
+
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_PREV = "prev"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_PLAY_PAUSE = "play_pause"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_NEXT = "next"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE = "subtitle"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU = "danmaku"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_UP = "up"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_LIKE = "like"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_COIN = "coin"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_FAV = "fav"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_RECOMMEND = "recommend"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_PLAYLIST = "playlist"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED = "advanced"
 
         private fun generateBuvid(): String {
             val bytes = ByteArray(16)

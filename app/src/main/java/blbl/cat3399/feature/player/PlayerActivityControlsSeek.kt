@@ -231,6 +231,38 @@ internal fun PlayerActivity.focusFirstControl() {
     binding.btnPlayPause.post { binding.btnPlayPause.requestFocus() }
 }
 
+private fun PlayerActivity.requestFocusControlNow(view: View?): Boolean {
+    val target = view ?: return false
+    if (target.visibility != View.VISIBLE) return false
+    if (!target.isEnabled) return false
+    if (!target.isFocusable) return false
+    return target.requestFocus()
+}
+
+internal fun PlayerActivity.focusDownKeyOsdTargetControl() {
+    val target =
+        when (BiliClient.prefs.playerDownKeyOsdFocusTarget) {
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_PREV -> binding.btnPrev
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_NEXT -> binding.btnNext
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE -> binding.btnSubtitle
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU -> binding.btnDanmaku
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_UP -> binding.btnUp
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_LIKE -> binding.btnLike
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_COIN -> binding.btnCoin
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_FAV -> binding.btnFav
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_RECOMMEND -> binding.btnRecommend
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_PLAYLIST -> binding.btnPlaylist
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED -> binding.btnAdvanced
+            else -> binding.btnPlayPause
+        }
+
+    binding.controlsRow.post {
+        if (requestFocusControlNow(target)) return@post
+        if (requestFocusControlNow(binding.btnPlayPause)) return@post
+        focusFirstControl()
+    }
+}
+
 internal fun PlayerActivity.focusSeekBar() {
     binding.seekProgress.post { binding.seekProgress.requestFocus() }
 }
