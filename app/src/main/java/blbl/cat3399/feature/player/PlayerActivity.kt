@@ -262,6 +262,9 @@ class PlayerActivity : BaseActivity() {
     private var resumeAfterDecoderReleasePositionMs: Long = 0L
     private var resumeExpiredUrlReloadArmed: Boolean = false
     private var resumeExpiredUrlReloadAttempted: Boolean = false
+    private var playUrlAutoRefreshJob: kotlinx.coroutines.Job? = null
+    private var playUrlAutoRefreshToken: Int = 0
+    private var playUrlAutoRefreshLastReloadAtElapsedMs: Long = 0L
 
     private fun exitTraceStart(trigger: String) {
         if (exitTraceStartAtMs != 0L) return
@@ -462,6 +465,7 @@ class PlayerActivity : BaseActivity() {
         if (exitCleanupRequested) return
         exitCleanupRequested = true
         exitCleanupReason = reason
+        cancelPlayUrlAutoRefresh(reason = "exit_cleanup:$reason")
         trace?.log("activity:exit:request", "reason=$reason")
         exitTraceLog(
             "exitCleanup:request",
@@ -1872,6 +1876,119 @@ class PlayerActivity : BaseActivity() {
         return msg.contains("403") || msg.contains("404") || msg.contains("410") || msg.contains("forbidden")
     }
 
+    internal fun cancelPlayUrlAutoRefresh(reason: String) {
+        playUrlAutoRefreshJob?.cancel()
+        playUrlAutoRefreshJob = null
+        playUrlAutoRefreshToken++
+        trace?.log("playurl:autoRefresh:cancel", "reason=$reason")
+    }
+
+    internal fun schedulePlayUrlAutoRefresh(playable: Playable, reason: String) {
+        if (exitCleanupRequested || isFinishing || isDestroyed) return
+        val exo = player ?: return
+
+        playUrlAutoRefreshJob?.cancel()
+        playUrlAutoRefreshJob = null
+
+        val nowWallMs = System.currentTimeMillis()
+        val deadlineEpochSec = pickEarliestDeadlineEpochSec(playable)
+
+        val delayMs =
+            if (deadlineEpochSec != null && deadlineEpochSec > 0L) {
+                val deadlineWallMs = deadlineEpochSec * 1000L
+                val refreshWallMs = deadlineWallMs - PLAYURL_AUTO_REFRESH_LEAD_MS
+                (refreshWallMs - nowWallMs).coerceAtLeast(0L)
+            } else {
+                val durationMs = currentViewDurationMs
+                if (durationMs != null && durationMs >= PLAYURL_AUTO_REFRESH_FALLBACK_MIN_DURATION_MS) {
+                    PLAYURL_AUTO_REFRESH_FALLBACK_DELAY_MS
+                } else {
+                    trace?.log(
+                        "playurl:autoRefresh:skip",
+                        "reason=$reason deadline=none duration=${durationMs ?: -1}ms",
+                    )
+                    return
+                }
+            }
+
+        val token = ++playUrlAutoRefreshToken
+        val bvid = currentBvid
+        val cid = currentCid
+        val posMs = exo.currentPosition.coerceAtLeast(0L)
+        trace?.log(
+            "playurl:autoRefresh:schedule",
+            "reason=$reason token=$token delay=${delayMs}ms pos=${posMs}ms deadline=${deadlineEpochSec ?: -1}",
+        )
+
+        playUrlAutoRefreshJob =
+            lifecycleScope.launch(Dispatchers.Default) {
+                delay(delayMs)
+                if (token != playUrlAutoRefreshToken) return@launch
+                val exo2 = player ?: return@launch
+                if (exitCleanupRequested || isFinishing || isDestroyed) return@launch
+                if (currentBvid != bvid || currentCid != cid) return@launch
+
+                val nowElapsed = SystemClock.elapsedRealtime()
+                if (nowElapsed - playUrlAutoRefreshLastReloadAtElapsedMs < PLAYURL_AUTO_REFRESH_MIN_RELOAD_INTERVAL_MS) {
+                    trace?.log("playurl:autoRefresh:skip", "throttle=1 token=$token")
+                    return@launch
+                }
+                if (exo2.playbackState == Player.STATE_ENDED && !exo2.playWhenReady) {
+                    trace?.log("playurl:autoRefresh:skip", "ended=1 token=$token")
+                    return@launch
+                }
+
+                playUrlAutoRefreshLastReloadAtElapsedMs = nowElapsed
+                trace?.log(
+                    "playurl:autoRefresh:reload",
+                    "token=$token pos=${exo2.currentPosition.coerceAtLeast(0L)}ms",
+                )
+                reloadStream(
+                    keepPosition = true,
+                    resetConstraints = false,
+                    autoPlay = exo2.playWhenReady,
+                )
+            }
+    }
+
+    private fun pickEarliestDeadlineEpochSec(playable: Playable): Long? {
+        fun parseDeadlineEpochSec(url: String): Long? {
+            val uri = runCatching { Uri.parse(url) }.getOrNull() ?: return null
+            val raw =
+                uri.getQueryParameter("deadline")
+                    ?: uri.getQueryParameter("expires")
+                    ?: return null
+            return raw.toLongOrNull()
+        }
+
+        fun earliestDeadlineEpochSec(urls: List<String>): Long? {
+            var best: Long? = null
+            for (u in urls) {
+                val sec = parseDeadlineEpochSec(u.trim()) ?: continue
+                if (sec <= 0L) continue
+                best = if (best == null) sec else minOf(best, sec)
+            }
+            return best
+        }
+
+        fun minNonNull(a: Long?, b: Long?): Long? =
+            when {
+                a == null -> b
+                b == null -> a
+                else -> minOf(a, b)
+            }
+
+        return when (playable) {
+            is Playable.Dash -> {
+                val video = earliestDeadlineEpochSec(playable.videoUrlCandidates.ifEmpty { listOf(playable.videoUrl) })
+                val audio = earliestDeadlineEpochSec(playable.audioUrlCandidates.ifEmpty { listOf(playable.audioUrl) })
+                minNonNull(video, audio)
+            }
+            is Playable.VideoOnly -> earliestDeadlineEpochSec(playable.videoUrlCandidates.ifEmpty { listOf(playable.videoUrl) })
+            is Playable.Progressive -> earliestDeadlineEpochSec(playable.urlCandidates.ifEmpty { listOf(playable.url) })
+        }
+    }
+
     private fun findHttpResponseCode(t: Throwable?): Int? {
         var cur = t ?: return null
         repeat(12) {
@@ -2261,6 +2378,7 @@ class PlayerActivity : BaseActivity() {
 	                        exo.setMediaSource(buildProgressive(mainFactory, playable.url, subtitleConfig))
 	                    }
 	                }
+                schedulePlayUrlAutoRefresh(playable, reason = "reload_stream")
                 exo.prepare()
                 applySubtitleEnabled(exo)
                 if (keepPosition) exo.seekTo(pos)
@@ -2714,5 +2832,9 @@ class PlayerActivity : BaseActivity() {
         private const val DANMAKU_PREFETCH_SEGMENTS = 2
         private const val DANMAKU_PREFETCH_INTERVAL_MS = 1_000L
         private const val DANMAKU_CACHE_SEGMENTS = 20
+        private const val PLAYURL_AUTO_REFRESH_LEAD_MS = 3 * 60_000L
+        private const val PLAYURL_AUTO_REFRESH_FALLBACK_DELAY_MS = 55 * 60_000L
+        private const val PLAYURL_AUTO_REFRESH_FALLBACK_MIN_DURATION_MS = 60 * 60_000L
+        private const val PLAYURL_AUTO_REFRESH_MIN_RELOAD_INTERVAL_MS = 30_000L
     }
 }

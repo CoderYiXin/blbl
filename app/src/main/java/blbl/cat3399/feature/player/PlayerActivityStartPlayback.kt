@@ -22,6 +22,7 @@ import blbl.cat3399.core.prefs.AppPrefs
 import kotlinx.coroutines.withContext
 
 internal fun PlayerActivity.resetPlaybackStateForNewMedia(exo: ExoPlayer) {
+    cancelPlayUrlAutoRefresh(reason = "new_media")
     traceFirstFrameLogged = false
     lastAvailableQns = emptyList()
     lastAvailableAudioIds = emptyList()
@@ -332,6 +333,7 @@ internal fun PlayerActivity.startPlayback(
                     }
                 }
                 trace?.log("exo:setMediaSource:done")
+                schedulePlayUrlAutoRefresh(playable, reason = "start_playback")
                 trace?.log("exo:prepare")
                 exo.prepare()
                 trace?.log("exo:playWhenReady")
