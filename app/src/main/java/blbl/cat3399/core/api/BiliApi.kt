@@ -1084,6 +1084,18 @@ object BiliApi {
 
     suspend fun dmFilterUser(forceRefresh: Boolean = false): DanmakuUserFilter = VideoApi.dmFilterUser(forceRefresh = forceRefresh)
 
+    internal fun isChargingArc(
+        isChargingArc: Boolean,
+        elecArcType: Int,
+        badgeText: String?,
+    ): Boolean {
+        if (isChargingArc) return true
+        if (elecArcType > 0) return true
+        val text = badgeText?.trim().orEmpty()
+        if (text.isBlank()) return false
+        return text.contains("充电")
+    }
+
     private fun parseSpaceArcSearchVideoCards(arr: JSONArray): List<VideoCard> {
         val out = ArrayList<VideoCard>(arr.length())
         for (i in 0 until arr.length()) {
@@ -1097,8 +1109,11 @@ object BiliApi {
             val cover = obj.optString("pic", obj.optString("cover", "")).trim()
             val durationText = obj.optString("length", obj.optString("duration", "0:00"))
             val isChargingArc =
-                obj.optBoolean("is_charging_arc", false) ||
-                    obj.optInt("elec_arc_type", 0) > 0
+                isChargingArc(
+                    isChargingArc = obj.optBoolean("is_charging_arc", false),
+                    elecArcType = obj.optInt("elec_arc_type", 0),
+                    badgeText = null,
+                )
             val play =
                 obj.optLong("play").takeIf { it > 0 }
                     ?: obj.optString("play").trim().toLongOrNull()?.takeIf { it > 0 }
@@ -1262,6 +1277,12 @@ object BiliApi {
                 val bvid = archive.optString("bvid", "")
                 if (bvid.isBlank()) continue
                 val stat = archive.optJSONObject("stat") ?: JSONObject()
+                val isChargingArc =
+                    isChargingArc(
+                        isChargingArc = archive.optBoolean("is_charging_arc", false),
+                        elecArcType = archive.optInt("elec_arc_type", 0),
+                        badgeText = archive.optJSONObject("badge")?.optString("text", ""),
+                    )
                 val pubDate = archive.optLong("pubdate").takeIf { v -> v > 0 } ?: authorPubTs
                 cards.add(
                     VideoCard(
@@ -1277,6 +1298,7 @@ object BiliApi {
                         danmaku = parseCountText(stat.optString("danmaku", "")),
                         pubDate = pubDate,
                         pubDateText = null,
+                        isChargingArc = isChargingArc,
                     ),
                 )
                 continue
@@ -1292,6 +1314,12 @@ object BiliApi {
                         ?: ""
                 if (bvid.isBlank()) continue
                 val stat = ugcSeason.optJSONObject("stat") ?: JSONObject()
+                val isChargingArc =
+                    isChargingArc(
+                        isChargingArc = ugcSeason.optBoolean("is_charging_arc", false),
+                        elecArcType = ugcSeason.optInt("elec_arc_type", 0),
+                        badgeText = ugcSeason.optJSONObject("badge")?.optString("text", ""),
+                    )
                 cards.add(
                     VideoCard(
                         bvid = bvid,
@@ -1306,6 +1334,7 @@ object BiliApi {
                         danmaku = parseCountText(stat.optString("danmaku", "")),
                         pubDate = authorPubTs,
                         pubDateText = null,
+                        isChargingArc = isChargingArc,
                     ),
                 )
                 continue
@@ -1321,6 +1350,12 @@ object BiliApi {
                         ?: (aid?.let { avToBv(it) })
                         ?: ""
                 if (bvid.isBlank()) continue
+                val isChargingArc =
+                    isChargingArc(
+                        isChargingArc = additionalUgc.optBoolean("is_charging_arc", false),
+                        elecArcType = additionalUgc.optInt("elec_arc_type", 0),
+                        badgeText = additionalUgc.optString("head_text", ""),
+                    )
                 cards.add(
                     VideoCard(
                         bvid = bvid,
@@ -1335,6 +1370,7 @@ object BiliApi {
                         danmaku = null,
                         pubDate = authorPubTs,
                         pubDateText = null,
+                        isChargingArc = isChargingArc,
                     ),
                 )
             }
