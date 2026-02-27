@@ -16,7 +16,9 @@ open class BaseActivity : AppCompatActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
-        ThemePresets.applyTo(this)
+        if (shouldApplyThemePreset()) {
+            ThemePresets.applyTo(this)
+        }
         super.onCreate(savedInstanceState)
         createdUiScaleFactor = UiScale.factor(this)
     }
@@ -27,6 +29,8 @@ open class BaseActivity : AppCompatActivity() {
     }
 
     protected open fun shouldRecreateOnUiScaleChange(): Boolean = true
+
+    protected open fun shouldApplyThemePreset(): Boolean = true
 
     private fun maybeRecreateOnUiScaleChanged() {
         if (!shouldRecreateOnUiScaleChange()) return

@@ -16,6 +16,7 @@ import blbl.cat3399.BuildConfig
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.log.LogExporter
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.theme.LauncherAliasManager
 import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.Immersive
 import blbl.cat3399.core.ui.popup.AppPopup
@@ -157,6 +158,7 @@ class SettingsInteractionHandler(
                     }
 
                     prefs.themePreset = key
+                    LauncherAliasManager.sync(activity.applicationContext, key)
                     AppToast.show(activity, "主题预设：$selected（已应用）")
                     restartToMainForThemePreset()
                 }

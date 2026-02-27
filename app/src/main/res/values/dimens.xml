@@ -1,5 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <dimen name="splash_logo_width">180dp</dimen>
+    <dimen name="splash_logo_height">186dp</dimen>
+
     <!-- Sidebar (baseline 1080p@1.5) -->
     <dimen name="sidebar_width">77dp</dimen>
     <dimen name="sidebar_user_size">48dp</dimen>
