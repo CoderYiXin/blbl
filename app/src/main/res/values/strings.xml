@@ -70,6 +70,14 @@
     <string name="label_exp_fmt">经验 %1$s</string>
     <string name="action_logout">退出登录</string>
 
+    <string name="up_tab_archive">投稿</string>
+    <string name="up_tab_collection">合集</string>
+    <string name="up_tab_series">系列</string>
+    <string name="up_tab_collection_series">合集和系列</string>
+    <string name="up_stat_fans">粉丝</string>
+    <string name="up_stat_likes">获赞</string>
+    <string name="up_stat_play">播放</string>
+
     <string name="disclaimer_title">使用协议</string>
     <string name="disclaimer_accept">接受并继续</string>
     <string name="disclaimer_exit">退出</string>

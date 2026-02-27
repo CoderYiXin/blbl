@@ -4,14 +4,16 @@ import android.content.Intent
 import android.content.res.ColorStateList
 import android.os.Bundle
 import android.view.KeyEvent
-import android.view.View
+import android.view.ViewGroup
 import androidx.core.view.isVisible
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
+import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.SimpleItemAnimator
 import blbl.cat3399.R
 import blbl.cat3399.core.api.BiliApi
+import blbl.cat3399.core.api.BiliApiException
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.tv.RemoteKeys
@@ -24,6 +26,9 @@ import blbl.cat3399.core.ui.GridSpanPolicy
 import blbl.cat3399.core.ui.Immersive
 import blbl.cat3399.core.ui.ThemeColor
 import blbl.cat3399.core.ui.cloneInUserScale
+import blbl.cat3399.core.ui.enableDpadTabFocus
+import blbl.cat3399.core.ui.postIfAlive
+import blbl.cat3399.core.util.Format
 import blbl.cat3399.databinding.ActivityUpDetailBinding
 import blbl.cat3399.feature.login.QrLoginActivity
 import blbl.cat3399.feature.player.PlayerActivity
@@ -32,27 +37,66 @@ import blbl.cat3399.feature.player.PlayerPlaylistStore
 import blbl.cat3399.feature.video.VideoDetailActivity
 import blbl.cat3399.feature.video.VideoCardAdapter
 import com.google.android.material.R as MaterialR
+import com.google.android.material.appbar.AppBarLayout
+import com.google.android.material.tabs.TabLayout
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONArray
+import org.json.JSONObject
 
 class UpDetailActivity : BaseActivity() {
     private lateinit var binding: ActivityUpDetailBinding
-    private lateinit var adapter: VideoCardAdapter
+
+    private lateinit var archiveAdapter: VideoCardAdapter
+    private lateinit var sectionAdapter: UpDetailSectionAdapter
+
+    private lateinit var archiveLayoutManager: GridLayoutManager
+    private lateinit var sectionsLayoutManager: LinearLayoutManager
 
     private val mid: Long by lazy { intent.getLongExtra(EXTRA_MID, 0L) }
+
+    private enum class UpTab { ARCHIVE, COLLECTION_SERIES }
+
+    private var currentTab: UpTab = UpTab.ARCHIVE
 
     private var isFollowed: Boolean = false
     private var followActionInFlight: Boolean = false
     private var loadedInitialInfo: Boolean = false
+    private var headerRequestToken: Int = 0
+    private var appBarVerticalOffset: Int = 0
+    private var pendingFocusHeaderAfterExpand: Boolean = false
+    private var tabSwitchRequestToken: Int = 0
 
-    private val loadedBvids = HashSet<String>()
-    private var isLoadingMore: Boolean = false
-    private var endReached: Boolean = false
-    private var nextPage: Int = 1
-    private var requestToken: Int = 0
+    private val loadedArchiveBvids = HashSet<String>()
+    private var archiveIsLoadingMore: Boolean = false
+    private var archiveEndReached: Boolean = false
+    private var archiveNextPage: Int = 1
+    private var archiveRequestToken: Int = 0
 
-    private var pendingFocusFirstItemAfterLoad: Boolean = false
-    private var dpadGridController: DpadGridController? = null
+    private val seasonsSeriesSections = ArrayList<UpDetailSection>()
+    private val loadedSectionStableIds = HashSet<String>()
+    private var seasonsSeriesIsLoadingMore: Boolean = false
+    private var seasonsSeriesEndReached: Boolean = false
+    private var seasonsSeriesNextPage: Int = 1
+    private var seasonsSeriesRequestToken: Int = 0
+
+    private data class SectionPagingState(
+        var nextPage: Int = 1,
+        var isLoading: Boolean = false,
+        var endReached: Boolean = false,
+        var totalCount: Int? = null,
+        val loadedBvids: HashSet<String> = HashSet(),
+    )
+
+    private val sectionPagingStates = HashMap<String, SectionPagingState>()
+    private val sectionPendingAdvanceIndex = HashMap<String, Int>()
+
+    private var pendingFocusFirstArchiveItemAfterLoad: Boolean = false
+    private var pendingFocusFirstSectionItemAfterLoad: Boolean = false
+    private var archiveGridController: DpadGridController? = null
+    private var focusListener: android.view.ViewTreeObserver.OnGlobalFocusChangeListener? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -60,6 +104,7 @@ class UpDetailActivity : BaseActivity() {
         binding = ActivityUpDetailBinding.inflate(layoutInflater.cloneInUserScale(this))
         setContentView(binding.root)
         Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
+        binding.swipeRefresh.isNestedScrollingEnabled = true
 
         if (mid <= 0L) {
             AppToast.show(this, "无效的 UP 主 mid")
@@ -67,132 +112,28 @@ class UpDetailActivity : BaseActivity() {
             return
         }
 
-        binding.btnBack.setOnClickListener { finish() }
-        binding.btnFollow.setOnClickListener { onFollowClicked() }
-        binding.btnFollow.setOnKeyListener { _, keyCode, event ->
-            if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                if (adapter.itemCount > 0) {
-                    focusGridAt(0)
-                    return@setOnKeyListener true
-                }
-            }
-            false
-        }
+        archiveLayoutManager = GridLayoutManager(this, spanCountForWidth())
+        sectionsLayoutManager = LinearLayoutManager(this, LinearLayoutManager.VERTICAL, false)
 
-        // Prefill header from list item to avoid empty UI.
-        binding.tvName.text = intent.getStringExtra(EXTRA_NAME).orEmpty()
-        binding.tvSign.text = intent.getStringExtra(EXTRA_SIGN).orEmpty()
-        binding.tvSign.isVisible = binding.tvSign.text.isNotBlank()
-        val avatar = intent.getStringExtra(EXTRA_AVATAR)
-        blbl.cat3399.core.image.ImageLoader.loadInto(binding.ivAvatar, blbl.cat3399.core.image.ImageUrl.avatar(avatar))
+        setupHeaderButtons()
+        prefillHeaderFromIntent()
+        setupAppBar()
+        setupAdapters()
+        setupTabs()
 
-        adapter =
-            VideoCardAdapter(
-                onClick = { card, pos ->
-                    val cards = adapter.snapshot()
-                    val playlistItems =
-                        cards.map {
-                            PlayerPlaylistItem(
-                                bvid = it.bvid,
-                                cid = it.cid,
-                                title = it.title,
-                            )
-                        }
-                    val token =
-                        PlayerPlaylistStore.put(
-                            items = playlistItems,
-                            index = pos,
-                            source = "UpDetail:$mid",
-                            uiCards = cards,
-                        )
-                    if (BiliClient.prefs.playerOpenDetailBeforePlay) {
-                        startActivity(
-                            Intent(this, VideoDetailActivity::class.java)
-                                .putExtra(VideoDetailActivity.EXTRA_BVID, card.bvid)
-                                .putExtra(VideoDetailActivity.EXTRA_CID, card.cid ?: -1L)
-                                .apply { card.aid?.let { putExtra(VideoDetailActivity.EXTRA_AID, it) } }
-                                .putExtra(VideoDetailActivity.EXTRA_TITLE, card.title)
-                                .putExtra(VideoDetailActivity.EXTRA_COVER_URL, card.coverUrl)
-                                .apply {
-                                    card.ownerName.takeIf { it.isNotBlank() }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_NAME, it) }
-                                    card.ownerFace?.takeIf { it.isNotBlank() }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_AVATAR, it) }
-                                    card.ownerMid?.takeIf { it > 0L }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_MID, it) }
-                                }
-                                .putExtra(VideoDetailActivity.EXTRA_PLAYLIST_TOKEN, token)
-                                .putExtra(VideoDetailActivity.EXTRA_PLAYLIST_INDEX, pos),
-                        )
-                    } else {
-                        startActivity(
-                            Intent(this, PlayerActivity::class.java)
-                                .putExtra(PlayerActivity.EXTRA_BVID, card.bvid)
-                                .putExtra(PlayerActivity.EXTRA_CID, card.cid ?: -1L)
-                                .putExtra(PlayerActivity.EXTRA_PLAYLIST_TOKEN, token)
-                                .putExtra(PlayerActivity.EXTRA_PLAYLIST_INDEX, pos),
-                        )
-                    }
-                },
-            )
         binding.recycler.setHasFixedSize(true)
-        binding.recycler.layoutManager = GridLayoutManager(this, spanCountForWidth())
-        binding.recycler.adapter = adapter
         (binding.recycler.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
+        applyRecyclerForCurrentTab()
+        installFocusListener()
 
-        binding.recycler.clearOnScrollListeners()
-        binding.recycler.addOnScrollListener(
-            object : RecyclerView.OnScrollListener() {
-                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
-                    if (dy <= 0) return
-                    if (isLoadingMore || endReached) return
-                    val lm = recyclerView.layoutManager as? GridLayoutManager ?: return
-                    val lastVisible = lm.findLastVisibleItemPosition()
-                    val total = adapter.itemCount
-                    if (total <= 0) return
-                    if (total - lastVisible - 1 <= 8) loadMoreFeed()
-                }
-            },
-        )
-        dpadGridController?.release()
-        dpadGridController =
-            DpadGridController(
-                recyclerView = binding.recycler,
-                callbacks =
-                    object : DpadGridController.Callbacks {
-                        override fun onTopEdge(): Boolean {
-                            if (binding.btnFollow.isVisible) {
-                                binding.btnFollow.requestFocus()
-                            } else {
-                                binding.btnBack.requestFocus()
-                            }
-                            return true
-                        }
-
-                        override fun onLeftEdge(): Boolean {
-                            // Allow default focus-search to reach header widgets if appropriate.
-                            return false
-                        }
-
-                        override fun onRightEdge() = Unit
-
-                        override fun canLoadMore(): Boolean = !endReached
-
-                        override fun loadMore() {
-                            loadMoreFeed()
-                        }
-                    },
-                config =
-                    DpadGridController.Config(
-                        isEnabled = { !isFinishing && !isDestroyed },
-                        enableCenterLongPressToLongClick = true,
-                    ),
-            ).also { it.install() }
-
-        binding.swipeRefresh.setOnRefreshListener { resetAndLoad() }
-        resetAndLoad()
+        binding.swipeRefresh.setOnRefreshListener { refreshCurrentTab() }
+        refreshCurrentTab(initial = true)
     }
 
     override fun onDestroy() {
-        dpadGridController?.release()
-        dpadGridController = null
+        uninstallFocusListener()
+        archiveGridController?.release()
+        archiveGridController = null
         ActivityStackLimiter.unregister(group = ACTIVITY_STACK_GROUP, activity = this)
         super.onDestroy()
     }
@@ -200,23 +141,43 @@ class UpDetailActivity : BaseActivity() {
     override fun onResume() {
         super.onResume()
         Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
-        (binding.recycler.layoutManager as? GridLayoutManager)?.spanCount = spanCountForWidth()
-        if (!binding.swipeRefresh.isRefreshing && adapter.itemCount == 0) {
-            resetAndLoad()
+
+        archiveAdapter.invalidateSizing()
+        sectionAdapter.invalidateSizing()
+
+        if (currentTab == UpTab.ARCHIVE) {
+            archiveLayoutManager.spanCount = spanCountForWidth()
+            if (!binding.swipeRefresh.isRefreshing && archiveAdapter.itemCount == 0) {
+                resetAndLoadArchive()
+            }
+        } else {
+            if (!binding.swipeRefresh.isRefreshing && sectionAdapter.itemCount == 0) {
+                ensureSeasonsSeriesLoadedIfNeeded()
+            }
         }
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         if (hasFocus) Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
-        if (hasFocus) maybeConsumePendingFocusFirstItemAfterLoad()
+        if (hasFocus) maybeConsumePendingFocusFirstContentAfterLoad()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && RemoteKeys.isRefreshKey(event.keyCode)) {
             if (binding.swipeRefresh.isRefreshing) return true
-            resetAndLoad()
+            refreshCurrentTab()
             return true
+        }
+        if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && event.keyCode == KeyEvent.KEYCODE_DPAD_UP) {
+            val focused = currentFocus
+            if (focused != null && FocusTreeUtils.isDescendantOf(focused, binding.recycler)) {
+                val next = focused.focusSearch(android.view.View.FOCUS_UP)
+                if (next == null || !FocusTreeUtils.isDescendantOf(next, binding.recycler)) {
+                    focusTabsFromContentEdge()
+                    return true
+                }
+            }
         }
         if (event.action == KeyEvent.ACTION_DOWN && currentFocus == null && isNavKey(event.keyCode)) {
             ensureInitialFocus()
@@ -225,39 +186,353 @@ class UpDetailActivity : BaseActivity() {
         return super.dispatchKeyEvent(event)
     }
 
-    private fun ensureInitialFocus() {
-        if (currentFocus != null) return
-        if (adapter.itemCount > 0) {
-            focusGridAt(0)
+    private fun setupHeaderButtons() {
+        binding.btnBack.setOnClickListener { finish() }
+        binding.btnBack.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            if (keyCode != KeyEvent.KEYCODE_DPAD_DOWN) return@setOnKeyListener false
+            focusSelectedTab()
+            true
+        }
+
+        binding.btnFollow.setOnClickListener { onFollowClicked() }
+        binding.btnFollow.setOnKeyListener { _, keyCode, event ->
+            if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+            if (keyCode != KeyEvent.KEYCODE_DPAD_DOWN) return@setOnKeyListener false
+            focusSelectedTab()
+            true
+        }
+    }
+
+    private fun setupAppBar() {
+        binding.appBar.addOnOffsetChangedListener(
+            AppBarLayout.OnOffsetChangedListener { _, verticalOffset ->
+                appBarVerticalOffset = verticalOffset
+                if (pendingFocusHeaderAfterExpand && verticalOffset == 0) {
+                    pendingFocusHeaderAfterExpand = false
+                    val focused = currentFocus
+                    if (focused == null || FocusTreeUtils.isDescendantOf(focused, binding.tabLayout)) {
+                        focusHeaderPreferred()
+                    }
+                }
+            },
+        )
+    }
+
+    private fun installFocusListener() {
+        if (focusListener != null) return
+        focusListener =
+            android.view.ViewTreeObserver.OnGlobalFocusChangeListener { _, newFocus ->
+                if (newFocus == null) return@OnGlobalFocusChangeListener
+                if (FocusTreeUtils.isDescendantOf(newFocus, binding.recycler)) {
+                    collapseHeaderForContent()
+                }
+            }.also { binding.root.viewTreeObserver.addOnGlobalFocusChangeListener(it) }
+    }
+
+    private fun uninstallFocusListener() {
+        focusListener?.let { binding.root.viewTreeObserver.removeOnGlobalFocusChangeListener(it) }
+        focusListener = null
+    }
+
+    private fun focusHeaderPreferred() {
+        if (binding.btnFollow.isVisible) {
+            binding.btnFollow.requestFocus()
+        } else {
+            binding.btnBack.requestFocus()
+        }
+    }
+
+    private fun requestExpandHeaderAndFocus() {
+        if (appBarVerticalOffset == 0) {
+            focusHeaderPreferred()
             return
         }
-        if (binding.btnFollow.isVisible) {
+        pendingFocusHeaderAfterExpand = true
+        binding.appBar.setExpanded(true, true)
+    }
+
+    private fun collapseHeaderForContent() {
+        val total = binding.appBar.totalScrollRange
+        if (total <= 0) return
+        val fullyCollapsedOffset = -total
+        if (appBarVerticalOffset > fullyCollapsedOffset) binding.appBar.setExpanded(false, true)
+    }
+
+    private fun prefillHeaderFromIntent() {
+        binding.tvName.text = intent.getStringExtra(EXTRA_NAME).orEmpty()
+        binding.tvSign.text = intent.getStringExtra(EXTRA_SIGN).orEmpty()
+        binding.tvSign.isVisible = binding.tvSign.text.isNotBlank()
+        binding.tvFansCount.text = "-"
+        binding.tvLikesCount.text = "-"
+        binding.tvPlayCount.text = "-"
+        val avatar = intent.getStringExtra(EXTRA_AVATAR)
+        blbl.cat3399.core.image.ImageLoader.loadInto(binding.ivAvatar, blbl.cat3399.core.image.ImageUrl.avatar(avatar))
+    }
+
+    private fun setupAdapters() {
+        archiveAdapter =
+            VideoCardAdapter(
+                onClick = { _, pos ->
+                    openVideoFromCards(
+                        cards = archiveAdapter.snapshot(),
+                        index = pos,
+                        source = "UpDetail:$mid:archive",
+                    )
+                },
+            )
+
+        sectionAdapter =
+            UpDetailSectionAdapter(
+                onVideoClick = { section, _, index ->
+                    openVideoFromCards(
+                        cards = section.videos,
+                        index = index,
+                        source = "UpDetail:$mid:${section.stableId}",
+                    )
+                },
+                onRequestLoadMore = { section, requestedNextIndex ->
+                    onSectionLoadMoreRequested(section, requestedNextIndex)
+                },
+                onRequestMoveToTabs = { focusTabsFromContentEdge() },
+            )
+    }
+
+    private fun setupTabs() {
+        binding.tabLayout.removeAllTabs()
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.up_tab_archive))
+        binding.tabLayout.addTab(binding.tabLayout.newTab().setText(R.string.up_tab_collection_series))
+
+        binding.tabLayout.addOnTabSelectedListener(
+            object : TabLayout.OnTabSelectedListener {
+                override fun onTabSelected(tab: TabLayout.Tab) {
+                    val next =
+                        when (tab.position) {
+                            1 -> UpTab.COLLECTION_SERIES
+                            else -> UpTab.ARCHIVE
+                        }
+                    switchTab(next)
+                }
+
+                override fun onTabUnselected(tab: TabLayout.Tab) = Unit
+
+                override fun onTabReselected(tab: TabLayout.Tab) = Unit
+            },
+        )
+
+        val tabLayout = binding.tabLayout
+        tabLayout.postIfAlive(isAlive = { !isFinishing && !isDestroyed }) {
+            tabLayout.enableDpadTabFocus(selectOnFocusProvider = { BiliClient.prefs.tabSwitchFollowsFocus })
+            val tabStrip = tabLayout.getChildAt(0) as? ViewGroup ?: return@postIfAlive
+            for (i in 0 until tabStrip.childCount) {
+                tabStrip.getChildAt(i).setOnKeyListener { _, keyCode, event ->
+                    if (event.action != KeyEvent.ACTION_DOWN) return@setOnKeyListener false
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_UP -> {
+                            requestExpandHeaderAndFocus()
+                            true
+                        }
+
+                        KeyEvent.KEYCODE_DPAD_DOWN -> {
+                            collapseHeaderForContent()
+                            requestFocusFirstContentFromTab()
+                            true
+                        }
+
+                        else -> false
+                    }
+                }
+            }
+        }
+    }
+
+    private fun switchTab(next: UpTab) {
+        if (currentTab == next) return
+        currentTab = next
+        // Tab switching can be triggered by focus changes while RecyclerView is recycling children
+        // (e.g. during generic motion scroll). Switching adapter/layout manager synchronously at that
+        // moment can crash with "Cannot call removeView(At) within removeView(At)".
+        val token = ++tabSwitchRequestToken
+        binding.recycler.postIfAlive(isAlive = { !isFinishing && !isDestroyed }) {
+            if (token != tabSwitchRequestToken) return@postIfAlive
+            applyRecyclerForCurrentTab()
+            ensureTabLoadedIfNeeded()
+        }
+    }
+
+    private fun applyRecyclerForCurrentTab() {
+        binding.recycler.clearOnScrollListeners()
+        when (currentTab) {
+            UpTab.ARCHIVE -> {
+                binding.recycler.adapter = archiveAdapter
+                binding.recycler.layoutManager = archiveLayoutManager
+                archiveLayoutManager.spanCount = spanCountForWidth()
+
+                binding.recycler.addOnScrollListener(
+                    object : RecyclerView.OnScrollListener() {
+                        override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                            if (dy > 0) collapseHeaderForContent()
+                            if (dy <= 0) return
+                            if (archiveIsLoadingMore || archiveEndReached) return
+                            val lm = recyclerView.layoutManager as? GridLayoutManager ?: return
+                            val lastVisible = lm.findLastVisibleItemPosition()
+                            val total = archiveAdapter.itemCount
+                            if (total <= 0) return
+                            if (total - lastVisible - 1 <= 8) loadMoreArchive()
+                        }
+                    },
+                )
+
+                installArchiveGridController()
+            }
+
+            UpTab.COLLECTION_SERIES -> {
+                binding.recycler.adapter = sectionAdapter
+                binding.recycler.layoutManager = sectionsLayoutManager
+                sectionAdapter.replaceAll(seasonsSeriesSections)
+                installSeasonsSeriesScrollListener()
+                releaseArchiveGridController()
+            }
+        }
+    }
+
+    private fun installSeasonsSeriesScrollListener() {
+        binding.recycler.addOnScrollListener(
+            object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    if (dy > 0) collapseHeaderForContent()
+                    if (dy <= 0) return
+                    if (seasonsSeriesIsLoadingMore || seasonsSeriesEndReached) return
+                    val lm = recyclerView.layoutManager as? LinearLayoutManager ?: return
+                    val lastVisible = lm.findLastVisibleItemPosition()
+                    val total = recyclerView.adapter?.itemCount ?: 0
+                    if (total <= 0) return
+                    if (total - lastVisible - 1 <= 2) loadMoreSeasonsSeries()
+                }
+            },
+        )
+    }
+
+    private fun ensureTabLoadedIfNeeded() {
+        when (currentTab) {
+            UpTab.ARCHIVE -> {
+                if (!binding.swipeRefresh.isRefreshing && archiveAdapter.itemCount == 0) {
+                    resetAndLoadArchive()
+                }
+            }
+
+            UpTab.COLLECTION_SERIES -> ensureSeasonsSeriesLoadedIfNeeded()
+        }
+    }
+
+    private fun ensureSeasonsSeriesLoadedIfNeeded() {
+        if (seasonsSeriesIsLoadingMore) return
+        if (seasonsSeriesSections.isNotEmpty()) return
+        resetAndLoadSeasonsSeries()
+    }
+
+    private fun refreshCurrentTab(initial: Boolean = false) {
+        if (!initial) {
+            binding.swipeRefresh.isRefreshing = true
+        }
+        loadHeader()
+        when (currentTab) {
+            UpTab.ARCHIVE -> resetAndLoadArchive()
+            UpTab.COLLECTION_SERIES -> resetAndLoadSeasonsSeries()
+        }
+    }
+
+    private fun ensureInitialFocus() {
+        if (currentFocus != null) return
+        if (requestFocusFirstContentIfPossible()) return
+        if (focusSelectedTab()) return
+        if (appBarVerticalOffset == 0 && binding.btnFollow.isVisible) {
             binding.btnFollow.requestFocus()
             return
         }
         binding.btnBack.requestFocus()
     }
 
-    private fun resetAndLoad() {
-        requestToken++
-        loadedBvids.clear()
-        nextPage = 1
-        endReached = false
-        isLoadingMore = false
-        pendingFocusFirstItemAfterLoad = true
-        dpadGridController?.clearPendingFocusAfterLoadMore()
-        adapter.submit(emptyList())
-        binding.swipeRefresh.isRefreshing = true
-        loadHeader()
-        loadMoreFeed(isRefresh = true)
+    private fun focusSelectedTab(): Boolean {
+        val tabLayout = binding.tabLayout
+        val tabStrip = tabLayout.getChildAt(0) as? ViewGroup ?: return binding.btnBack.requestFocus()
+        val selected = tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: 0
+
+        fun tryFocusTabView(view: android.view.View?): Boolean {
+            if (view == null) return false
+            view.isFocusable = true
+            view.isFocusableInTouchMode = true
+            return view.requestFocus()
+        }
+
+        if (tryFocusTabView(tabStrip.getChildAt(selected))) return true
+        for (i in 0 until tabStrip.childCount) {
+            if (tryFocusTabView(tabStrip.getChildAt(i))) return true
+        }
+        return binding.btnBack.requestFocus()
+    }
+
+    private fun focusTabsFromContentEdge() {
+        focusSelectedTab()
+    }
+
+    private fun requestFocusFirstContentFromTab(): Boolean {
+        when (currentTab) {
+            UpTab.ARCHIVE -> {
+                if (archiveAdapter.itemCount > 0) {
+                    focusGridAt(0)
+                    return true
+                }
+                pendingFocusFirstArchiveItemAfterLoad = true
+                if (!binding.swipeRefresh.isRefreshing) resetAndLoadArchive()
+                return true
+            }
+
+            UpTab.COLLECTION_SERIES -> {
+                if (seasonsSeriesSections.isNotEmpty()) {
+                    focusFirstSectionVideo()
+                    return true
+                }
+                pendingFocusFirstSectionItemAfterLoad = true
+                ensureSeasonsSeriesLoadedIfNeeded()
+                return true
+            }
+        }
+    }
+
+    private fun requestFocusFirstContentIfPossible(): Boolean {
+        return when (currentTab) {
+            UpTab.ARCHIVE -> {
+                if (archiveAdapter.itemCount <= 0) return false
+                focusGridAt(0)
+                true
+            }
+
+            UpTab.COLLECTION_SERIES -> {
+                if (seasonsSeriesSections.isEmpty()) return false
+                focusFirstSectionVideo()
+                true
+            }
+        }
     }
 
     private fun loadHeader() {
-        val token = requestToken
+        val token = ++headerRequestToken
+        binding.tvFansCount.text = "-"
+        binding.tvLikesCount.text = "-"
+        binding.tvPlayCount.text = "-"
         lifecycleScope.launch {
-            try {
-                val info = BiliApi.spaceAccInfo(mid)
-                if (token != requestToken) return@launch
+            val info =
+                try {
+                    BiliApi.spaceAccInfo(mid)
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    AppLog.w("UpDetail", "loadHeader failed mid=$mid", t)
+                    null
+                }
+            if (token != headerRequestToken) return@launch
+
+            if (info != null) {
                 loadedInitialInfo = true
                 binding.tvName.text = info.name
                 binding.tvSign.text = info.sign.orEmpty()
@@ -265,21 +540,57 @@ class UpDetailActivity : BaseActivity() {
                 blbl.cat3399.core.image.ImageLoader.loadInto(binding.ivAvatar, blbl.cat3399.core.image.ImageUrl.avatar(info.faceUrl))
                 isFollowed = info.isFollowed
                 updateFollowUi()
-            } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                AppLog.w("UpDetail", "loadHeader failed mid=$mid", t)
-                if (!loadedInitialInfo) {
-                    binding.tvName.text = binding.tvName.text.takeIf { it.isNotBlank() } ?: "加载失败"
+            } else if (!loadedInitialInfo) {
+                binding.tvName.text = binding.tvName.text.takeIf { it.isNotBlank() } ?: "加载失败"
+            }
+
+            val relation =
+                try {
+                    BiliApi.relationStat(mid)
+                } catch (t: Throwable) {
+                    if (t is CancellationException) throw t
+                    null
+                }
+            if (relation != null) {
+                if (token != headerRequestToken) return@launch
+                binding.tvFansCount.text = Format.count(relation.follower)
+            }
+
+            if (BiliClient.cookies.hasSessData()) {
+                val upstat =
+                    try {
+                        BiliApi.spaceUpStat(mid)
+                    } catch (t: Throwable) {
+                        if (t is CancellationException) throw t
+                        null
+                    }
+                if (upstat != null) {
+                    if (token != headerRequestToken) return@launch
+                    binding.tvLikesCount.text = Format.count(upstat.likes)
+                    binding.tvPlayCount.text = Format.count(upstat.archiveView)
                 }
             }
         }
     }
 
-    private fun loadMoreFeed(isRefresh: Boolean = false) {
-        if (isLoadingMore || endReached) return
-        val token = requestToken
-        val targetPage = nextPage.coerceAtLeast(1)
-        isLoadingMore = true
+    private fun resetAndLoadArchive() {
+        archiveRequestToken++
+        loadedArchiveBvids.clear()
+        archiveNextPage = 1
+        archiveEndReached = false
+        archiveIsLoadingMore = false
+        pendingFocusFirstArchiveItemAfterLoad = true
+        archiveGridController?.clearPendingFocusAfterLoadMore()
+        archiveAdapter.submit(emptyList())
+        binding.swipeRefresh.isRefreshing = true
+        loadMoreArchive(isRefresh = true)
+    }
+
+    private fun loadMoreArchive(isRefresh: Boolean = false) {
+        if (archiveIsLoadingMore || archiveEndReached) return
+        val token = archiveRequestToken
+        val targetPage = archiveNextPage.coerceAtLeast(1)
+        archiveIsLoadingMore = true
         lifecycleScope.launch {
             try {
                 val page =
@@ -288,27 +599,356 @@ class UpDetailActivity : BaseActivity() {
                         pn = targetPage,
                         ps = 30,
                     )
-                if (token != requestToken) return@launch
+                if (token != archiveRequestToken) return@launch
 
-                nextPage = targetPage + 1
-                endReached = page.items.isEmpty() || !page.hasMore
+                archiveNextPage = targetPage + 1
+                archiveEndReached = page.items.isEmpty() || !page.hasMore
 
-                val filtered = page.items.filter { loadedBvids.add(it.bvid) }
-                if (isRefresh) adapter.submit(filtered) else adapter.append(filtered)
+                val filtered = page.items.filter { loadedArchiveBvids.add(it.bvid) }
+                if (isRefresh) archiveAdapter.submit(filtered) else archiveAdapter.append(filtered)
 
                 binding.recycler.post {
-                    maybeConsumePendingFocusFirstItemAfterLoad()
-                    dpadGridController?.consumePendingFocusAfterLoadMore()
+                    maybeConsumePendingFocusFirstContentAfterLoad()
+                    archiveGridController?.consumePendingFocusAfterLoadMore()
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
-                AppLog.e("UpDetail", "loadFeed failed mid=$mid page=$targetPage", t)
+                AppLog.e("UpDetail", "loadArchive failed mid=$mid page=$targetPage", t)
                 AppToast.show(this@UpDetailActivity, "加载失败，可查看 Logcat(标签 BLBL)")
             } finally {
-                if (token == requestToken) binding.swipeRefresh.isRefreshing = false
-                isLoadingMore = false
+                if (token == archiveRequestToken) binding.swipeRefresh.isRefreshing = false
+                archiveIsLoadingMore = false
             }
         }
+    }
+
+    private fun resetAndLoadSeasonsSeries() {
+        seasonsSeriesRequestToken++
+        seasonsSeriesNextPage = 1
+        seasonsSeriesEndReached = false
+        seasonsSeriesIsLoadingMore = false
+        loadedSectionStableIds.clear()
+        seasonsSeriesSections.clear()
+        sectionPagingStates.clear()
+        sectionPendingAdvanceIndex.clear()
+        pendingFocusFirstSectionItemAfterLoad = true
+        binding.swipeRefresh.isRefreshing = true
+        if (currentTab == UpTab.COLLECTION_SERIES) sectionAdapter.replaceAll(emptyList())
+        loadMoreSeasonsSeries(isRefresh = true)
+    }
+
+    private fun ensureSectionPagingState(section: UpDetailSection): SectionPagingState {
+        val key = section.stableId
+        val state = sectionPagingStates.getOrPut(key) { SectionPagingState(totalCount = section.totalCount) }
+        if (state.totalCount == null && section.totalCount != null && section.totalCount > 0) {
+            state.totalCount = section.totalCount
+        }
+        for (v in section.videos) {
+            val bvid = v.bvid.trim()
+            if (bvid.isBlank()) continue
+            state.loadedBvids.add(bvid)
+        }
+        val total = state.totalCount
+        if (!state.endReached && total != null && total > 0 && state.loadedBvids.size >= total) {
+            state.endReached = true
+        }
+        return state
+    }
+
+    private fun onSectionLoadMoreRequested(section: UpDetailSection, requestedNextIndex: Int) {
+        val stableId = section.stableId
+        val latest = seasonsSeriesSections.firstOrNull { it.stableId == stableId } ?: section
+        val state = ensureSectionPagingState(latest)
+        if (state.isLoading || state.endReached) return
+        sectionPendingAdvanceIndex[stableId] = requestedNextIndex.coerceAtLeast(0)
+        loadMoreSectionVideos(section = latest, state = state)
+    }
+
+    private data class SectionArchivesParsedPage(
+        val totalCount: Int?,
+        val videos: List<blbl.cat3399.core.model.VideoCard>,
+    )
+
+    private fun parseSectionArchivesPage(json: JSONObject, ownerFallback: String): SectionArchivesParsedPage {
+        val data = json.optJSONObject("data") ?: JSONObject()
+        val total = data.optJSONObject("page")?.optInt("total", 0)?.takeIf { it > 0 }
+        val archives = data.optJSONArray("archives") ?: JSONArray()
+        val videos = parseVideoCardsFromArchives(archives, ownerFallback = ownerFallback)
+        return SectionArchivesParsedPage(totalCount = total, videos = videos)
+    }
+
+    private fun appendVideosToSectionInMemory(sectionStableId: String, videos: List<blbl.cat3399.core.model.VideoCard>): UpDetailSection? {
+        if (videos.isEmpty()) return null
+        val idx = seasonsSeriesSections.indexOfFirst { it.stableId == sectionStableId }
+        if (idx < 0) return null
+        val old = seasonsSeriesSections[idx]
+        val updated = old.copy(videos = old.videos + videos)
+        seasonsSeriesSections[idx] = updated
+        return updated
+    }
+
+    private fun loadMoreSectionVideos(section: UpDetailSection, state: SectionPagingState) {
+        if (state.isLoading || state.endReached) return
+        val token = seasonsSeriesRequestToken
+        val targetPage = state.nextPage.coerceAtLeast(1)
+        state.isLoading = true
+        val ownerFallback = binding.tvName.text?.toString().orEmpty().trim()
+        lifecycleScope.launch {
+            try {
+                val json =
+                    when (section.kind) {
+                        UpDetailSectionKind.SEASON ->
+                            BiliApi.seasonsArchivesList(
+                                mid = mid,
+                                seasonId = section.id,
+                                pageNum = targetPage,
+                                pageSize = 30,
+                                sortReverse = false,
+                            )
+
+                        UpDetailSectionKind.SERIES ->
+                            BiliApi.seriesArchives(
+                                mid = mid,
+                                seriesId = section.id,
+                                pageNum = targetPage,
+                                pageSize = 20,
+                                sort = "desc",
+                                onlyNormal = true,
+                            )
+                    }
+                if (token != seasonsSeriesRequestToken) return@launch
+
+                val code = json.optInt("code", 0)
+                if (code != 0) {
+                    val msg = json.optString("message", json.optString("msg", "")).ifBlank { "加载失败" }
+                    throw BiliApiException(apiCode = code, apiMessage = msg)
+                }
+
+                val parsed =
+                    withContext(Dispatchers.Default) {
+                        parseSectionArchivesPage(json, ownerFallback = ownerFallback)
+                    }
+                if (token != seasonsSeriesRequestToken) return@launch
+
+                val newVideos =
+                    buildList {
+                        for (v in parsed.videos) {
+                            val bvid = v.bvid.trim()
+                            if (bvid.isBlank()) continue
+                            if (state.loadedBvids.add(bvid)) add(v)
+                        }
+                    }
+
+                if (parsed.totalCount != null && parsed.totalCount > 0) {
+                    state.totalCount = parsed.totalCount
+                }
+
+                state.nextPage = targetPage + 1
+                if (parsed.videos.isEmpty()) state.endReached = true
+                val total = state.totalCount
+                if (!state.endReached && total != null && total > 0 && state.loadedBvids.size >= total) {
+                    state.endReached = true
+                }
+
+                if (newVideos.isNotEmpty()) {
+                    val stableId = section.stableId
+                    appendVideosToSectionInMemory(stableId, newVideos)
+                    sectionAdapter.appendVideos(stableId, newVideos)
+
+                    val pendingIndex = sectionPendingAdvanceIndex.remove(stableId)
+                    if (pendingIndex != null) {
+                        binding.recycler.post { sectionAdapter.requestVideoFocus(stableId, pendingIndex) }
+                    }
+                } else {
+                    sectionPendingAdvanceIndex.remove(section.stableId)
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                val msg =
+                    (t as? BiliApiException)?.apiMessage?.trim()?.takeIf { it.isNotBlank() }
+                        ?: t.message.orEmpty()
+                AppLog.w("UpDetail", "loadSectionVideos failed mid=$mid section=${section.stableId} page=$targetPage", t)
+                AppToast.show(this@UpDetailActivity, msg.ifBlank { "加载失败" })
+                sectionPendingAdvanceIndex.remove(section.stableId)
+            } finally {
+                state.isLoading = false
+            }
+        }
+    }
+
+    private data class SeasonsSeriesParsedPage(
+        val totalPages: Int,
+        val sections: List<UpDetailSection>,
+    )
+
+    private fun loadMoreSeasonsSeries(isRefresh: Boolean = false) {
+        if (seasonsSeriesIsLoadingMore || seasonsSeriesEndReached) return
+        val token = seasonsSeriesRequestToken
+        val targetPage = seasonsSeriesNextPage.coerceAtLeast(1)
+        seasonsSeriesIsLoadingMore = true
+        val ownerFallback = binding.tvName.text?.toString().orEmpty().trim()
+        lifecycleScope.launch {
+            try {
+                val json = BiliApi.seasonsSeriesList(mid = mid, pageNum = targetPage, pageSize = 10)
+                if (token != seasonsSeriesRequestToken) return@launch
+
+                val code = json.optInt("code", 0)
+                if (code != 0) {
+                    val msg = json.optString("message", json.optString("msg", "")).ifBlank { "加载失败" }
+                    throw BiliApiException(apiCode = code, apiMessage = msg)
+                }
+
+                val parsed =
+                    withContext(Dispatchers.Default) {
+                        parseSeasonsSeriesPage(json, ownerFallback = ownerFallback)
+                    }
+                if (token != seasonsSeriesRequestToken) return@launch
+
+                val hasAny = parsed.sections.isNotEmpty()
+                seasonsSeriesNextPage = targetPage + 1
+                seasonsSeriesEndReached =
+                    when {
+                        parsed.totalPages > 0 -> targetPage >= parsed.totalPages
+                        else -> !hasAny
+                    }
+
+                val inserted = ArrayList<UpDetailSection>(parsed.sections.size)
+                for (section in parsed.sections) {
+                    if (!loadedSectionStableIds.add(section.stableId)) continue
+                    seasonsSeriesSections.add(section)
+                    inserted.add(section)
+                    ensureSectionPagingState(section)
+                }
+
+                if (currentTab == UpTab.COLLECTION_SERIES) {
+                    if (isRefresh) sectionAdapter.replaceAll(seasonsSeriesSections) else sectionAdapter.appendSections(inserted)
+                }
+
+                binding.recycler.post {
+                    // Always run: this might be triggered by DPAD_DOWN on tabs, not only pull-to-refresh.
+                    maybeConsumePendingFocusFirstContentAfterLoad()
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                AppLog.e("UpDetail", "loadSeasonsSeries failed mid=$mid page=$targetPage", t)
+                val msg =
+                    (t as? BiliApiException)?.apiMessage?.trim()?.takeIf { it.isNotBlank() }
+                        ?: t.message.orEmpty()
+                AppToast.show(this@UpDetailActivity, msg.ifBlank { "加载失败" })
+            } finally {
+                if (token == seasonsSeriesRequestToken) binding.swipeRefresh.isRefreshing = false
+                seasonsSeriesIsLoadingMore = false
+            }
+        }
+    }
+
+    private fun parseSeasonsSeriesPage(json: JSONObject, ownerFallback: String): SeasonsSeriesParsedPage {
+        val itemsLists =
+            json.optJSONObject("data")
+                ?.optJSONObject("items_lists")
+                ?: JSONObject()
+        val pageObj = itemsLists.optJSONObject("page") ?: JSONObject()
+        val totalPages = pageObj.optInt("total", 0).coerceAtLeast(0)
+        val seasons = itemsLists.optJSONArray("seasons_list") ?: JSONArray()
+        val series = itemsLists.optJSONArray("series_list") ?: JSONArray()
+
+        fun parseSectionsArray(arr: JSONArray, kind: UpDetailSectionKind): List<UpDetailSection> {
+            val out = ArrayList<UpDetailSection>(arr.length())
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val meta = obj.optJSONObject("meta") ?: JSONObject()
+                val id =
+                    when (kind) {
+                        UpDetailSectionKind.SEASON -> meta.optLong("season_id").takeIf { it > 0 }
+                        UpDetailSectionKind.SERIES -> meta.optLong("series_id").takeIf { it > 0 }
+                    } ?: continue
+                val title = meta.optString("name", "").trim().takeIf { it.isNotBlank() } ?: continue
+                val total = meta.optInt("total", 0).takeIf { it > 0 }
+                val archives = obj.optJSONArray("archives") ?: JSONArray()
+                val videos = parseVideoCardsFromArchives(archives, ownerFallback = ownerFallback)
+                if (videos.isEmpty()) continue
+                out.add(
+                    UpDetailSection(
+                        kind = kind,
+                        id = id,
+                        title = title,
+                        totalCount = total,
+                        videos = videos,
+                    ),
+                )
+            }
+            return out
+        }
+
+        return SeasonsSeriesParsedPage(
+            totalPages = totalPages,
+            sections =
+                buildList {
+                    addAll(parseSectionsArray(seasons, kind = UpDetailSectionKind.SEASON))
+                    addAll(parseSectionsArray(series, kind = UpDetailSectionKind.SERIES))
+                },
+        )
+    }
+
+    private fun parseVideoCardsFromArchives(arr: JSONArray, ownerFallback: String): List<blbl.cat3399.core.model.VideoCard> {
+        val out = ArrayList<blbl.cat3399.core.model.VideoCard>(arr.length())
+
+        fun parseDurationSec(obj: JSONObject): Int {
+            val byInt = obj.optInt("duration", 0).takeIf { it > 0 }
+            if (byInt != null) return byInt
+            val text = obj.optString("duration_text", obj.optString("duration", "0:00"))
+            return BiliApi.parseDuration(text)
+        }
+
+        for (i in 0 until arr.length()) {
+            val obj = arr.optJSONObject(i) ?: continue
+            val bvid = obj.optString("bvid", "").trim()
+            if (bvid.isBlank()) continue
+            val aid = obj.optLong("aid").takeIf { it > 0 }
+            val cid = obj.optLong("cid").takeIf { it > 0 }
+            val title = obj.optString("title", "").trim().ifBlank { "视频 ${i + 1}" }
+            val cover = obj.optString("pic", obj.optString("cover", "")).trim()
+
+            val ownerObj = obj.optJSONObject("owner") ?: JSONObject()
+            val ownerName =
+                ownerObj.optString("name", "").trim().ifBlank {
+                    obj.optString("author", "").trim()
+                }.ifBlank {
+                    ownerFallback
+                }
+            val ownerFace = ownerObj.optString("face", "").trim().takeIf { it.isNotBlank() }
+            val ownerMid =
+                ownerObj.optLong("mid").takeIf { it > 0 }
+                    ?: obj.optLong("mid").takeIf { it > 0 }
+
+            val statObj = obj.optJSONObject("stat") ?: JSONObject()
+            val view =
+                statObj.optLong("view").takeIf { it > 0 }
+                    ?: statObj.optLong("play").takeIf { it > 0 }
+            val danmaku =
+                statObj.optLong("danmaku").takeIf { it > 0 }
+                    ?: statObj.optLong("dm").takeIf { it > 0 }
+            val pubDate = obj.optLong("pubdate").takeIf { it > 0 }
+
+            out.add(
+                blbl.cat3399.core.model.VideoCard(
+                    bvid = bvid,
+                    cid = cid,
+                    aid = aid,
+                    title = title,
+                    coverUrl = cover,
+                    durationSec = parseDurationSec(obj),
+                    ownerName = ownerName,
+                    ownerFace = ownerFace,
+                    ownerMid = ownerMid,
+                    view = view,
+                    danmaku = danmaku,
+                    pubDate = pubDate,
+                    pubDateText = null,
+                ),
+            )
+        }
+        return out
     }
 
     private fun onFollowClicked() {
@@ -333,7 +973,7 @@ class UpDetailActivity : BaseActivity() {
                 if (t is CancellationException) throw t
                 AppLog.w("UpDetail", "modifyRelation failed mid=$mid wantFollow=$wantFollow", t)
                 val raw =
-                    (t as? blbl.cat3399.core.api.BiliApiException)?.apiMessage?.takeIf { it.isNotBlank() }
+                    (t as? BiliApiException)?.apiMessage?.takeIf { it.isNotBlank() }
                         ?: t.message.orEmpty()
                 val msg =
                     when (raw) {
@@ -344,7 +984,6 @@ class UpDetailActivity : BaseActivity() {
             } finally {
                 followActionInFlight = false
                 updateFollowUi()
-                // Keep in sync in case server side changed.
                 loadHeader()
             }
         }
@@ -392,17 +1031,173 @@ class UpDetailActivity : BaseActivity() {
         }
     }
 
-    private fun maybeConsumePendingFocusFirstItemAfterLoad() {
-        if (!pendingFocusFirstItemAfterLoad) return
+    private fun focusFirstSectionVideo() {
+        val recycler = binding.recycler
+        recycler.post outer@{
+            if (isFinishing || isDestroyed) return@outer
+
+            val outerVh = recycler.findViewHolderForAdapterPosition(0)
+            val innerRecycler =
+                outerVh?.itemView?.findViewById<RecyclerView>(R.id.recycler_videos)
+            if (innerRecycler != null) {
+                val innerVh = innerRecycler.findViewHolderForAdapterPosition(0)
+                if (innerVh != null) {
+                    innerVh.itemView.requestFocus()
+                    return@outer
+                }
+                innerRecycler.scrollToPosition(0)
+                innerRecycler.post {
+                    if (isFinishing || isDestroyed) return@post
+                    innerRecycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() ?: innerRecycler.requestFocus()
+                }
+                return@outer
+            }
+
+            recycler.scrollToPosition(0)
+            recycler.post inner@{
+                if (isFinishing || isDestroyed) return@inner
+                val vh = recycler.findViewHolderForAdapterPosition(0)
+                val inner =
+                    vh?.itemView?.findViewById<RecyclerView>(R.id.recycler_videos)
+                        ?: return@inner
+                inner.scrollToPosition(0)
+                inner.post {
+                    if (isFinishing || isDestroyed) return@post
+                    inner.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() ?: inner.requestFocus()
+                }
+            }
+        }
+    }
+
+    private fun maybeConsumePendingFocusFirstContentAfterLoad() {
         if (!hasWindowFocus()) return
+
         val focused = currentFocus
         if (focused != null && focused != binding.recycler && FocusTreeUtils.isDescendantOf(focused, binding.recycler)) {
-            pendingFocusFirstItemAfterLoad = false
+            pendingFocusFirstArchiveItemAfterLoad = false
+            pendingFocusFirstSectionItemAfterLoad = false
             return
         }
-        if (adapter.itemCount <= 0) return
-        pendingFocusFirstItemAfterLoad = false
-        focusGridAt(0)
+
+        when (currentTab) {
+            UpTab.ARCHIVE -> {
+                if (!pendingFocusFirstArchiveItemAfterLoad) return
+                if (archiveAdapter.itemCount <= 0) return
+                pendingFocusFirstArchiveItemAfterLoad = false
+                focusGridAt(0)
+            }
+
+            UpTab.COLLECTION_SERIES -> {
+                if (!pendingFocusFirstSectionItemAfterLoad) return
+                if (seasonsSeriesSections.isEmpty()) return
+                pendingFocusFirstSectionItemAfterLoad = false
+                focusFirstSectionVideo()
+            }
+        }
+    }
+
+    private fun installArchiveGridController() {
+        if (archiveGridController != null) return
+        archiveGridController?.release()
+        archiveGridController =
+            DpadGridController(
+                recyclerView = binding.recycler,
+                callbacks =
+                    object : DpadGridController.Callbacks {
+                        override fun onTopEdge(): Boolean {
+                            focusTabsFromContentEdge()
+                            return true
+                        }
+
+                        override fun onLeftEdge(): Boolean {
+                            return switchToPrevTabFromContentEdge()
+                        }
+
+                        override fun onRightEdge() {
+                            switchToNextTabFromContentEdge()
+                        }
+
+                        override fun canLoadMore(): Boolean = !archiveEndReached
+
+                        override fun loadMore() {
+                            loadMoreArchive()
+                        }
+                    },
+                config =
+                    DpadGridController.Config(
+                        isEnabled = { !isFinishing && !isDestroyed && currentTab == UpTab.ARCHIVE },
+                        enableCenterLongPressToLongClick = true,
+                    ),
+            ).also { it.install() }
+    }
+
+    private fun releaseArchiveGridController() {
+        archiveGridController?.release()
+        archiveGridController = null
+    }
+
+    private fun switchToNextTabFromContentEdge(): Boolean {
+        val cur = binding.tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: 0
+        val next = cur + 1
+        if (next >= binding.tabLayout.tabCount) return false
+        binding.tabLayout.getTabAt(next)?.select() ?: return false
+        binding.recycler.postIfAlive(isAlive = { !isFinishing && !isDestroyed }) { requestFocusFirstContentFromTab() }
+        return true
+    }
+
+    private fun switchToPrevTabFromContentEdge(): Boolean {
+        val cur = binding.tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: 0
+        val prev = cur - 1
+        if (prev < 0) return false
+        binding.tabLayout.getTabAt(prev)?.select() ?: return false
+        binding.recycler.postIfAlive(isAlive = { !isFinishing && !isDestroyed }) { requestFocusFirstContentFromTab() }
+        return true
+    }
+
+    private fun openVideoFromCards(cards: List<blbl.cat3399.core.model.VideoCard>, index: Int, source: String) {
+        if (cards.isEmpty()) return
+        val pos = index.coerceIn(0, cards.size - 1)
+        val card = cards[pos]
+        val playlistItems =
+            cards.map {
+                PlayerPlaylistItem(
+                    bvid = it.bvid,
+                    cid = it.cid,
+                    title = it.title,
+                )
+            }
+        val token =
+            PlayerPlaylistStore.put(
+                items = playlistItems,
+                index = pos,
+                source = source,
+                uiCards = cards,
+            )
+        if (BiliClient.prefs.playerOpenDetailBeforePlay) {
+            startActivity(
+                Intent(this, VideoDetailActivity::class.java)
+                    .putExtra(VideoDetailActivity.EXTRA_BVID, card.bvid)
+                    .putExtra(VideoDetailActivity.EXTRA_CID, card.cid ?: -1L)
+                    .apply { card.aid?.let { putExtra(VideoDetailActivity.EXTRA_AID, it) } }
+                    .putExtra(VideoDetailActivity.EXTRA_TITLE, card.title)
+                    .putExtra(VideoDetailActivity.EXTRA_COVER_URL, card.coverUrl)
+                    .apply {
+                        card.ownerName.takeIf { it.isNotBlank() }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_NAME, it) }
+                        card.ownerFace?.takeIf { it.isNotBlank() }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_AVATAR, it) }
+                        card.ownerMid?.takeIf { it > 0L }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_MID, it) }
+                    }
+                    .putExtra(VideoDetailActivity.EXTRA_PLAYLIST_TOKEN, token)
+                    .putExtra(VideoDetailActivity.EXTRA_PLAYLIST_INDEX, pos),
+            )
+        } else {
+            startActivity(
+                Intent(this, PlayerActivity::class.java)
+                    .putExtra(PlayerActivity.EXTRA_BVID, card.bvid)
+                    .putExtra(PlayerActivity.EXTRA_CID, card.cid ?: -1L)
+                    .putExtra(PlayerActivity.EXTRA_PLAYLIST_TOKEN, token)
+                    .putExtra(PlayerActivity.EXTRA_PLAYLIST_INDEX, pos),
+            )
+        }
     }
 
     private fun spanCountForWidth(): Int {

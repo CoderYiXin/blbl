@@ -171,6 +171,12 @@ object BiliApi {
         val follower: Long,
     )
 
+    data class SpaceUpStat(
+        val archiveView: Long,
+        val articleView: Long?,
+        val likes: Long,
+    )
+
     data class DanmakuWebSetting(
         val dmSwitch: Boolean,
         val allowScroll: Boolean,
@@ -315,6 +321,46 @@ object BiliApi {
         return RelationStat(
             following = data.optLong("following"),
             follower = data.optLong("follower"),
+        )
+    }
+
+    suspend fun spaceUpStat(mid: Long): SpaceUpStat {
+        val safeMid = mid.takeIf { it > 0 } ?: error("mid required")
+        val url =
+            BiliClient.withQuery(
+                "https://api.bilibili.com/x/space/upstat",
+                mapOf("mid" to safeMid.toString()),
+            )
+        val json = BiliClient.getJson(url)
+        val code = json.optInt("code", 0)
+        if (code != 0) {
+            val msg = json.optString("message", json.optString("msg", ""))
+            throw BiliApiException(apiCode = code, apiMessage = msg)
+        }
+        val data = json.optJSONObject("data") ?: JSONObject()
+        if (data.length() <= 0) error("space_upstat_empty")
+
+        val archiveView =
+            data.optJSONObject("archive")
+                ?.optLong("view")
+                ?.takeIf { it >= 0 }
+                ?: 0L
+        val articleView =
+            data.optJSONObject("article")
+                ?.optLong("view")
+                ?.takeIf { it >= 0 }
+        val likesAny = data.opt("likes")
+        val likes =
+            when (likesAny) {
+                is Number -> likesAny.toLong().coerceAtLeast(0)
+                is String -> likesAny.toLongOrNull()?.coerceAtLeast(0) ?: 0L
+                else -> data.optLong("likes").coerceAtLeast(0)
+            }
+
+        return SpaceUpStat(
+            archiveView = archiveView,
+            articleView = articleView,
+            likes = likes,
         )
     }
 
@@ -1007,6 +1053,34 @@ object BiliApi {
             pageNum = pageNum,
             pageSize = pageSize,
             sortReverse = sortReverse,
+        )
+
+    suspend fun seasonsSeriesList(
+        mid: Long,
+        pageNum: Int = 1,
+        pageSize: Int = 20,
+    ): JSONObject =
+        VideoApi.seasonsSeriesList(
+            mid = mid,
+            pageNum = pageNum,
+            pageSize = pageSize,
+        )
+
+    suspend fun seriesArchives(
+        mid: Long,
+        seriesId: Long,
+        pageNum: Int = 1,
+        pageSize: Int = 20,
+        sort: String = "desc",
+        onlyNormal: Boolean = true,
+    ): JSONObject =
+        VideoApi.seriesArchives(
+            mid = mid,
+            seriesId = seriesId,
+            pageNum = pageNum,
+            pageSize = pageSize,
+            sort = sort,
+            onlyNormal = onlyNormal,
         )
 
     suspend fun onlineTotal(bvid: String, cid: Long): JSONObject = VideoApi.onlineTotal(bvid = bvid, cid = cid)

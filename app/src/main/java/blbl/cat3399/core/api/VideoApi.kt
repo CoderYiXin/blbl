@@ -281,6 +281,66 @@ internal object VideoApi {
         return BiliClient.getJson(url, headers = BiliApi.piliWebHeaders(targetUrl = url, includeCookie = true), noCookies = true)
     }
 
+    suspend fun seasonsSeriesList(
+        mid: Long,
+        pageNum: Int = 1,
+        pageSize: Int = 20,
+    ): JSONObject {
+        val safeMid = mid.takeIf { it > 0 } ?: error("mid required")
+        val safePageNum = pageNum.coerceAtLeast(1)
+        val safePageSize = pageSize.coerceIn(1, 50)
+
+        val keys = BiliClient.ensureWbiKeys()
+        val url =
+            BiliClient.signedWbiUrl(
+                path = "/x/polymer/web-space/seasons_series_list",
+                params =
+                    mapOf(
+                        "mid" to safeMid.toString(),
+                        "page_num" to safePageNum.toString(),
+                        "page_size" to safePageSize.toString(),
+                        "web_location" to "333.999",
+                    ),
+                keys = keys,
+            )
+        return BiliClient.getJson(url, headers = BiliApi.piliWebHeaders(targetUrl = url, includeCookie = true), noCookies = true)
+    }
+
+    suspend fun seriesArchives(
+        mid: Long,
+        seriesId: Long,
+        pageNum: Int = 1,
+        pageSize: Int = 20,
+        sort: String = "desc",
+        onlyNormal: Boolean = true,
+    ): JSONObject {
+        val safeMid = mid.takeIf { it > 0 } ?: error("mid required")
+        val safeSeriesId = seriesId.takeIf { it > 0 } ?: error("seriesId required")
+        val safePageNum = pageNum.coerceAtLeast(1)
+        val safePageSize = pageSize.coerceIn(1, 50)
+        val safeSort =
+            when (sort.trim().lowercase()) {
+                "asc" -> "asc"
+                else -> "desc"
+            }
+        val currentMid = BiliClient.cookies.getCookieValue("DedeUserID")?.trim()?.toLongOrNull()?.takeIf { it > 0 }
+
+        val url =
+            BiliClient.withQuery(
+                "https://api.bilibili.com/x/series/archives",
+                buildMap {
+                    put("mid", safeMid.toString())
+                    put("series_id", safeSeriesId.toString())
+                    put("pn", safePageNum.toString())
+                    put("ps", safePageSize.toString())
+                    put("sort", safeSort)
+                    put("only_normal", onlyNormal.toString())
+                    currentMid?.let { put("current_mid", it.toString()) }
+                },
+            )
+        return BiliClient.getJson(url, headers = BiliApi.piliWebHeaders(targetUrl = url, includeCookie = true), noCookies = true)
+    }
+
     suspend fun favResourceDeal(
         rid: Long,
         addMediaIds: List<Long>,
