@@ -80,13 +80,6 @@ internal fun PlayerActivity.refreshSettings(adapter: PlayerSettingsAdapter) {
         buildList {
             add(
                 PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.PLAYER_ENGINE,
-                    title = "播放器内核",
-                    subtitle = playerEngineSubtitle(),
-                ),
-            )
-            add(
-                PlayerSettingsAdapter.SettingItem(
                     key = PlayerSettingKeys.RESOLUTION,
                     title = "分辨率",
                     subtitle = resolutionSubtitle(),
@@ -183,6 +176,13 @@ internal fun PlayerActivity.refreshSettings(adapter: PlayerSettingsAdapter) {
                     key = PlayerSettingKeys.PERSISTENT_BOTTOM_PROGRESS,
                     title = "底部常驻进度条",
                     subtitle = if (prefs.playerPersistentBottomProgressEnabled) "开" else "关",
+                ),
+            )
+            add(
+                PlayerSettingsAdapter.SettingItem(
+                    key = PlayerSettingKeys.PLAYER_ENGINE,
+                    title = "播放器内核",
+                    subtitle = playerEngineSubtitle(),
                 ),
             )
         }

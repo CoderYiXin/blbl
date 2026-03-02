@@ -40,6 +40,7 @@ class SettingsActivity : BaseActivity() {
             "弹幕设置",
             "关于应用",
             "设备信息",
+            "其他设置",
         )
 
     override fun onCreate(savedInstanceState: Bundle?) {

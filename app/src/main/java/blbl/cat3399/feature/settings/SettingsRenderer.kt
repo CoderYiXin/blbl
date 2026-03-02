@@ -211,7 +211,6 @@ class SettingsRenderer(
                         null,
                     ),
                     SettingEntry(SettingId.PlayerPreferredAudioId, "默认音轨", SettingsText.audioText(prefs.playerPreferredAudioId), null),
-                    SettingEntry(SettingId.PlayerCdnPreference, "CDN线路", SettingsText.cdnText(prefs.playerCdnPreference), null),
                     SettingEntry(SettingId.PlayerSpeed, "默认播放速度", String.format(java.util.Locale.US, "%.2fx", prefs.playerSpeed), null),
                     SettingEntry(
                         SettingId.PlayerHoldSeekSpeed,
@@ -233,22 +232,7 @@ class SettingsRenderer(
                     SettingEntry(SettingId.SubtitleTextSizeSp, "字幕字体大小", prefs.subtitleTextSizeSp.toInt().toString(), null),
                     SettingEntry(SettingId.SubtitleEnabledDefault, "默认开启字幕", if (prefs.subtitleEnabledDefault) "开" else "关", null),
                     SettingEntry(SettingId.PlayerPreferredCodec, "视频编码", prefs.playerPreferredCodec, null),
-                    SettingEntry(SettingId.PlayerRenderView, "渲染视图", SettingsText.renderViewText(prefs.playerRenderViewType), null),
-                    SettingEntry(SettingId.PlayerEngineKind, "播放器内核", SettingsText.playerEngineText(prefs.playerEngineKind), null),
-                    SettingEntry(
-                        SettingId.PlayerAudioBalance,
-                        "音频平衡",
-                        AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel).label,
-                        null,
-                    ),
                     SettingEntry(SettingId.PlayerOsdButtons, "OSD按钮显示", SettingsText.playerOsdButtonsText(prefs.playerOsdButtons), null),
-                    SettingEntry(
-                        SettingId.PlayerCustomShortcuts,
-                        "自定义播放快捷键",
-                        prefs.playerCustomShortcuts.let { if (it.isEmpty()) "未设置" else "已设置 ${it.size} 个" },
-                        "播放时按指定按键切换播放设置（再按一次切回上次值）",
-                    ),
-                    SettingEntry(SettingId.PlayerDebugEnabled, "显示视频调试信息", if (prefs.playerDebugEnabled) "开" else "关", null),
                     SettingEntry(SettingId.PlayerDoubleBackToExit, "按两次退出键才退出播放器", if (prefs.playerDoubleBackToExit) "开" else "关", null),
                     SettingEntry(
                         SettingId.PlayerDownKeyOsdFocusTarget,
@@ -262,6 +246,26 @@ class SettingsRenderer(
                         if (prefs.playerPersistentBottomProgressEnabled) "开" else "关",
                         null,
                     ),
+                )
+
+            "其他设置" ->
+                listOf(
+                    SettingEntry(SettingId.PlayerRenderView, "渲染视图", SettingsText.renderViewText(prefs.playerRenderViewType), null),
+                    SettingEntry(SettingId.PlayerEngineKind, "播放器内核", SettingsText.playerEngineText(prefs.playerEngineKind), null),
+                    SettingEntry(
+                        SettingId.PlayerCustomShortcuts,
+                        "自定义播放快捷键",
+                        prefs.playerCustomShortcuts.let { if (it.isEmpty()) "未设置" else "已设置 ${it.size} 个" },
+                        "播放时按指定按键切换播放设置（再按一次切回上次值）",
+                    ),
+                    SettingEntry(
+                        SettingId.PlayerAudioBalance,
+                        "音频平衡",
+                        AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel).label,
+                        null,
+                    ),
+                    SettingEntry(SettingId.PlayerCdnPreference, "CDN线路", SettingsText.cdnText(prefs.playerCdnPreference), null),
+                    SettingEntry(SettingId.PlayerDebugEnabled, "显示视频调试信息", if (prefs.playerDebugEnabled) "开" else "关", null),
                 )
 
             "弹幕设置" ->
