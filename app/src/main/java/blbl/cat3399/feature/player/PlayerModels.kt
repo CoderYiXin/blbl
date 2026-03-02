@@ -113,6 +113,8 @@ internal data class PlayerSessionSettings(
     val subtitleEnabled: Boolean,
     val subtitleLangOverride: String?,
     val subtitleTextSizeSp: Float,
+    val subtitleBottomPaddingFraction: Float,
+    val subtitleBackgroundOpacity: Float,
     val danmaku: DanmakuSessionSettings,
     val debugEnabled: Boolean,
 )
@@ -131,6 +133,8 @@ internal fun PlayerSessionSettings.toEngineSwitchJsonString(): String {
             put("subtitleEnabled", subtitleEnabled)
             put("subtitleLangOverride", subtitleLangOverride ?: JSONObject.NULL)
             put("subtitleTextSizeSp", subtitleTextSizeSp.toDouble())
+            put("subtitleBottomPaddingFraction", subtitleBottomPaddingFraction.toDouble())
+            put("subtitleBackgroundOpacity", subtitleBackgroundOpacity.toDouble())
             put("danmakuEnabled", danmaku.enabled)
             put("danmakuOpacity", danmaku.opacity.toDouble())
             put("danmakuTextSizeSp", danmaku.textSizeSp.toDouble())
@@ -170,6 +174,12 @@ internal fun PlayerSessionSettings.restoreFromEngineSwitchJsonString(raw: String
     val subEnabled = obj.optBoolean("subtitleEnabled", subtitleEnabled)
     val subLangOverride = optStringOrNull("subtitleLangOverride")
     val subTextSize = optFloat("subtitleTextSizeSp", subtitleTextSizeSp).coerceIn(10f, 60f)
+    val subBottomPaddingFraction =
+        optFloat("subtitleBottomPaddingFraction", subtitleBottomPaddingFraction)
+            .coerceIn(0f, 0.30f)
+    val subBackgroundOpacity =
+        optFloat("subtitleBackgroundOpacity", subtitleBackgroundOpacity)
+            .coerceIn(0f, 1.0f)
     val danEnabled = obj.optBoolean("danmakuEnabled", danmaku.enabled)
     val danOpacity = optFloat("danmakuOpacity", danmaku.opacity).coerceIn(0.05f, 1.0f)
     val danText = optFloat("danmakuTextSizeSp", danmaku.textSizeSp).coerceIn(10f, 60f)
@@ -188,6 +198,8 @@ internal fun PlayerSessionSettings.restoreFromEngineSwitchJsonString(raw: String
         subtitleEnabled = subEnabled,
         subtitleLangOverride = subLangOverride,
         subtitleTextSizeSp = subTextSize,
+        subtitleBottomPaddingFraction = subBottomPaddingFraction,
+        subtitleBackgroundOpacity = subBackgroundOpacity,
         danmaku =
             danmaku.copy(
                 enabled = danEnabled,

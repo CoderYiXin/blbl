@@ -230,6 +230,18 @@ class SettingsRenderer(
                     SettingEntry(SettingId.PlayerPlaybackMode, "播放模式", SettingsText.playbackModeText(prefs.playerPlaybackMode), null),
                     SettingEntry(SettingId.SubtitlePreferredLang, "字幕语言", SettingsText.subtitleLangText(prefs.subtitlePreferredLang), null),
                     SettingEntry(SettingId.SubtitleTextSizeSp, "字幕字体大小", prefs.subtitleTextSizeSp.toInt().toString(), null),
+                    SettingEntry(
+                        SettingId.SubtitleBottomPaddingFraction,
+                        "字幕底部间距",
+                        SettingsText.subtitleBottomPaddingText(prefs.subtitleBottomPaddingFraction),
+                        null,
+                    ),
+                    SettingEntry(
+                        SettingId.SubtitleBackgroundOpacity,
+                        "字幕背景透明度",
+                        SettingsText.subtitleBackgroundOpacityText(prefs.subtitleBackgroundOpacity),
+                        null,
+                    ),
                     SettingEntry(SettingId.SubtitleEnabledDefault, "默认开启字幕", if (prefs.subtitleEnabledDefault) "开" else "关", null),
                     SettingEntry(SettingId.PlayerPreferredCodec, "视频编码", prefs.playerPreferredCodec, null),
                     SettingEntry(SettingId.PlayerOsdButtons, "OSD按钮显示", SettingsText.playerOsdButtonsText(prefs.playerOsdButtons), null),

@@ -41,6 +41,8 @@ enum class SettingId(
     PlayerPlaybackMode("player_playback_mode"),
     SubtitlePreferredLang("subtitle_preferred_lang"),
     SubtitleTextSizeSp("subtitle_text_size_sp"),
+    SubtitleBottomPaddingFraction("subtitle_bottom_padding_fraction"),
+    SubtitleBackgroundOpacity("subtitle_background_opacity"),
     SubtitleEnabledDefault("subtitle_enabled_default"),
     PlayerPreferredCodec("player_preferred_codec"),
     PlayerRenderView("player_render_view"),

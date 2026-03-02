@@ -28,6 +28,17 @@ object SettingsText {
             else -> code
         }
 
+    fun subtitleBottomPaddingText(fraction: Float): String {
+        val v = fraction.takeIf { it.isFinite() } ?: 0.16f
+        val pct = (v.coerceIn(0f, 0.30f) * 100f).roundToInt()
+        return "${pct}%"
+    }
+
+    fun subtitleBackgroundOpacityText(opacity: Float): String {
+        val v = opacity.takeIf { it.isFinite() } ?: (34f / 255f)
+        return String.format(Locale.US, "%.2f", v.coerceIn(0f, 1.0f))
+    }
+
     fun areaText(area: Float): String =
         when {
             area >= 0.99f -> "不限"

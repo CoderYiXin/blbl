@@ -446,6 +446,8 @@ class SettingsInteractionHandler(
                     .put("subtitle_lang", prefs.subtitlePreferredLang)
                     .put("subtitle_enabled_default", prefs.subtitleEnabledDefault)
                     .put("subtitle_text_size_sp", prefs.subtitleTextSizeSp)
+                    .put("subtitle_bottom_padding_fraction", prefs.subtitleBottomPaddingFraction)
+                    .put("subtitle_background_opacity", prefs.subtitleBackgroundOpacity)
                     .put("speed", prefs.playerSpeed)
                     .put("hold_seek_speed", prefs.playerHoldSeekSpeed)
                     .put("hold_seek_mode", prefs.playerHoldSeekMode)
@@ -672,6 +674,41 @@ class SettingsInteractionHandler(
                     current = prefs.subtitleTextSizeSp.toInt().toString(),
                 ) { selected ->
                     prefs.subtitleTextSizeSp = (selected.toIntOrNull() ?: 26).toFloat().coerceIn(10f, 60f)
+                    renderer.refreshSection(entry.id)
+                }
+            }
+
+            SettingId.SubtitleBottomPaddingFraction -> {
+                val options = (0..30 step 2).toList()
+                val items = options.map { "${it}%" }
+                val checked =
+                    options.indices.minByOrNull { kotlin.math.abs(options[it] / 100f - prefs.subtitleBottomPaddingFraction) }
+                        ?: 0
+                showChoiceDialog(
+                    title = "字幕底部间距(占屏比%)",
+                    items = items,
+                    checkedIndex = checked,
+                ) { selected ->
+                    val percent = selected.removeSuffix("%").toIntOrNull() ?: options.getOrNull(checked) ?: 16
+                    prefs.subtitleBottomPaddingFraction = percent / 100f
+                    renderer.refreshSection(entry.id)
+                }
+            }
+
+            SettingId.SubtitleBackgroundOpacity -> {
+                val options = (20 downTo 0).map { it / 20f }.toMutableList()
+                val defaultOpacity = 34f / 255f
+                if (options.none { kotlin.math.abs(it - defaultOpacity) < 0.005f }) options.add(defaultOpacity)
+                val ordered = options.distinct().sortedDescending()
+                val items = ordered.map { String.format(Locale.US, "%.2f", it) }
+                val checked = ordered.indices.minByOrNull { kotlin.math.abs(ordered[it] - prefs.subtitleBackgroundOpacity) } ?: 0
+                showChoiceDialog(
+                    title = "字幕背景透明度",
+                    items = items,
+                    checkedIndex = checked,
+                ) { selected ->
+                    val value = selected.toFloatOrNull() ?: ordered.getOrNull(checked) ?: prefs.subtitleBackgroundOpacity
+                    prefs.subtitleBackgroundOpacity = value.coerceIn(0f, 1.0f)
                     renderer.refreshSection(entry.id)
                 }
             }

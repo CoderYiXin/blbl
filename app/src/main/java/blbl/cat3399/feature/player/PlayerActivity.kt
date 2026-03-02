@@ -679,6 +679,8 @@ class PlayerActivity : BaseActivity() {
             subtitleEnabled = prefs.subtitleEnabledDefault,
             subtitleLangOverride = null,
             subtitleTextSizeSp = prefs.subtitleTextSizeSp,
+            subtitleBottomPaddingFraction = prefs.subtitleBottomPaddingFraction,
+            subtitleBackgroundOpacity = prefs.subtitleBackgroundOpacity,
             danmaku = DanmakuSessionSettings(
                 enabled = prefs.danmakuEnabled,
                 opacity = prefs.danmakuOpacity,

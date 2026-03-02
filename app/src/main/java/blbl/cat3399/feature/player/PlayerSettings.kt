@@ -19,6 +19,7 @@ import blbl.cat3399.feature.player.engine.ExoPlayerEngine
 import blbl.cat3399.feature.player.engine.IjkPlayerPluginUi
 import blbl.cat3399.feature.player.engine.PlayerEngineKind
 import kotlin.math.abs
+import kotlin.math.roundToInt
 import kotlinx.coroutines.launch
 import java.util.Locale
 
@@ -32,6 +33,8 @@ internal object PlayerSettingKeys {
     const val PLAYBACK_MODE = "playback_mode"
     const val SUBTITLE_LANG = "subtitle_lang"
     const val SUBTITLE_TEXT_SIZE = "subtitle_text_size"
+    const val SUBTITLE_BOTTOM_PADDING = "subtitle_bottom_padding"
+    const val SUBTITLE_BACKGROUND_OPACITY = "subtitle_background_opacity"
     const val DANMAKU_OPACITY = "danmaku_opacity"
     const val DANMAKU_TEXT_SIZE = "danmaku_text_size"
     const val DANMAKU_SPEED = "danmaku_speed"
@@ -51,6 +54,8 @@ internal fun PlayerActivity.handleSettingsItemClick(item: PlayerSettingsAdapter.
         PlayerSettingKeys.PLAYBACK_MODE -> showPlaybackModeDialog()
         PlayerSettingKeys.SUBTITLE_LANG -> showSubtitleLangDialog()
         PlayerSettingKeys.SUBTITLE_TEXT_SIZE -> showSubtitleTextSizeDialog()
+        PlayerSettingKeys.SUBTITLE_BOTTOM_PADDING -> showSubtitleBottomPaddingDialog()
+        PlayerSettingKeys.SUBTITLE_BACKGROUND_OPACITY -> showSubtitleBackgroundOpacityDialog()
         PlayerSettingKeys.DANMAKU_OPACITY -> showDanmakuOpacityDialog()
         PlayerSettingKeys.DANMAKU_TEXT_SIZE -> showDanmakuTextSizeDialog()
         PlayerSettingKeys.DANMAKU_SPEED -> showDanmakuSpeedDialog()
@@ -133,6 +138,20 @@ internal fun PlayerActivity.refreshSettings(adapter: PlayerSettingsAdapter) {
                         key = PlayerSettingKeys.SUBTITLE_TEXT_SIZE,
                         title = "字幕字体大小",
                         subtitle = session.subtitleTextSizeSp.toInt().toString(),
+                    ),
+                )
+                add(
+                    PlayerSettingsAdapter.SettingItem(
+                        key = PlayerSettingKeys.SUBTITLE_BOTTOM_PADDING,
+                        title = "字幕底部间距",
+                        subtitle = "${(session.subtitleBottomPaddingFraction * 100f).roundToInt()}%",
+                    ),
+                )
+                add(
+                    PlayerSettingsAdapter.SettingItem(
+                        key = PlayerSettingKeys.SUBTITLE_BACKGROUND_OPACITY,
+                        title = "字幕背景透明度",
+                        subtitle = String.format(Locale.US, "%.2f", session.subtitleBackgroundOpacity),
                     ),
                 )
             }
@@ -643,22 +662,108 @@ internal fun PlayerActivity.showSubtitleTextSizeDialog() {
     }
 }
 
+internal fun PlayerActivity.showSubtitleBottomPaddingDialog() {
+    val options = (0..30 step 2).toList()
+    val items = options.map { "${it}%" }
+    val current =
+        options.indices.minByOrNull { abs(options[it] / 100f - session.subtitleBottomPaddingFraction) }
+            ?: options.indexOf(16).takeIf { it >= 0 }
+            ?: 0
+    showSettingsSingleChoiceDialog(
+        title = "字幕底部间距",
+        items = items,
+        checkedIndex = current,
+    ) { which, _ ->
+        val percent = options.getOrNull(which) ?: return@showSettingsSingleChoiceDialog
+        session = session.copy(subtitleBottomPaddingFraction = (percent / 100f).coerceIn(0f, 0.30f))
+        applySubtitleStyle()
+        (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.let { refreshSettings(it) }
+    }
+}
+
+internal fun PlayerActivity.showSubtitleBackgroundOpacityDialog() {
+    val options = (20 downTo 0).map { it / 20f }.toMutableList()
+    val defaultOpacity = 34f / 255f
+    if (options.none { abs(it - defaultOpacity) < 0.005f }) options.add(defaultOpacity)
+    val ordered = options.distinct().sortedDescending()
+    val items = ordered.map { String.format(Locale.US, "%.2f", it) }
+    val current = ordered.indices.minByOrNull { abs(ordered[it] - session.subtitleBackgroundOpacity) } ?: 0
+    showSettingsSingleChoiceDialog(
+        title = "字幕背景透明度",
+        items = items,
+        checkedIndex = current,
+    ) { which, _ ->
+        val v = ordered.getOrNull(which) ?: return@showSettingsSingleChoiceDialog
+        session = session.copy(subtitleBackgroundOpacity = v.coerceIn(0f, 1.0f))
+        applySubtitleStyle()
+        (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.let { refreshSettings(it) }
+    }
+}
+
 internal fun PlayerActivity.configureSubtitleView() {
     val subtitleView = binding.playerView.findViewById<SubtitleView>(androidx.media3.ui.R.id.exo_subtitles) ?: return
-    // Move subtitles slightly up from the very bottom.
-    subtitleView.setBottomPaddingFraction(0.16f)
+    applySubtitleStyle(subtitleView)
+    applySubtitleTextSize()
+}
+
+internal fun PlayerActivity.applySubtitleStyle() {
+    val subtitleView = binding.playerView.findViewById<SubtitleView>(androidx.media3.ui.R.id.exo_subtitles) ?: return
+    applySubtitleStyle(subtitleView)
+}
+
+private fun PlayerActivity.applySubtitleStyle(subtitleView: SubtitleView) {
+    val bottomPaddingFraction =
+        session.subtitleBottomPaddingFraction
+            .let { if (it.isFinite()) it else 0.16f }
+            .coerceIn(0f, 0.30f)
+    // Prefer padding-based positioning to work consistently across different cue defaults.
+    // Keep SubtitleView's own bottomPaddingFraction at 0 to avoid double-applying spacing.
+    subtitleView.setBottomPaddingFraction(0f)
+    applySubtitlePaddingFraction(subtitleView, bottomPaddingFraction)
+
+    val bgOpacity =
+        session.subtitleBackgroundOpacity
+            .let { if (it.isFinite()) it else (34f / 255f) }
+            .coerceIn(0f, 1.0f)
+    val alpha = (bgOpacity * 255f).roundToInt().coerceIn(0, 255)
+    val backgroundColor = (alpha shl 24)
+
     // Make background more transparent while keeping readability.
     subtitleView.setStyle(
         CaptionStyleCompat(
             /* foregroundColor= */ 0xFFFFFFFF.toInt(),
-            /* backgroundColor= */ 0x22000000,
+            /* backgroundColor= */ backgroundColor,
             /* windowColor= */ 0x00000000,
             /* edgeType= */ CaptionStyleCompat.EDGE_TYPE_OUTLINE,
             /* edgeColor= */ 0xCC000000.toInt(),
             /* typeface= */ null,
         ),
     )
-    applySubtitleTextSize()
+}
+
+private fun PlayerActivity.applySubtitlePaddingFraction(subtitleView: SubtitleView, fraction: Float) {
+    val basePadding =
+        (subtitleView.getTag(blbl.cat3399.R.id.tag_player_subtitle_base_padding) as? IntArray)
+            ?.takeIf { it.size == 4 }
+            ?: intArrayOf(
+                subtitleView.paddingLeft,
+                subtitleView.paddingTop,
+                subtitleView.paddingRight,
+                subtitleView.paddingBottom,
+            ).also { subtitleView.setTag(blbl.cat3399.R.id.tag_player_subtitle_base_padding, it) }
+
+    val h = binding.playerView.height.takeIf { it > 0 } ?: subtitleView.height
+    if (h <= 0) {
+        subtitleView.post { applySubtitlePaddingFraction(subtitleView, fraction) }
+        return
+    }
+    val extraBottomPx = (h * fraction.coerceIn(0f, 0.30f)).roundToInt().coerceAtLeast(0)
+    subtitleView.setPadding(
+        /* left= */ basePadding[0],
+        /* top= */ basePadding[1],
+        /* right= */ basePadding[2],
+        /* bottom= */ basePadding[3] + extraBottomPx,
+    )
 }
 
 internal fun PlayerActivity.applySubtitleTextSize() {

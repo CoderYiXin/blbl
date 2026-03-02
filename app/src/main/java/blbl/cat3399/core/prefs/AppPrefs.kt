@@ -258,6 +258,28 @@ class AppPrefs(context: Context) {
             prefs.edit().putFloat(KEY_SUBTITLE_TEXT_SIZE_SP, v).apply()
         }
 
+    var subtitleBottomPaddingFraction: Float
+        get() {
+            val v = prefs.getFloat(KEY_SUBTITLE_BOTTOM_PADDING_FRACTION, SUBTITLE_BOTTOM_PADDING_FRACTION_DEFAULT)
+            if (!v.isFinite()) return SUBTITLE_BOTTOM_PADDING_FRACTION_DEFAULT
+            return v.coerceIn(0f, 0.30f)
+        }
+        set(value) {
+            val v = if (value.isFinite()) value.coerceIn(0f, 0.30f) else SUBTITLE_BOTTOM_PADDING_FRACTION_DEFAULT
+            prefs.edit().putFloat(KEY_SUBTITLE_BOTTOM_PADDING_FRACTION, v).apply()
+        }
+
+    var subtitleBackgroundOpacity: Float
+        get() {
+            val v = prefs.getFloat(KEY_SUBTITLE_BACKGROUND_OPACITY, SUBTITLE_BACKGROUND_OPACITY_DEFAULT)
+            if (!v.isFinite()) return SUBTITLE_BACKGROUND_OPACITY_DEFAULT
+            return v.coerceIn(0f, 1.0f)
+        }
+        set(value) {
+            val v = if (value.isFinite()) value.coerceIn(0f, 1.0f) else SUBTITLE_BACKGROUND_OPACITY_DEFAULT
+            prefs.edit().putFloat(KEY_SUBTITLE_BACKGROUND_OPACITY, v).apply()
+        }
+
     var playerSpeed: Float
         get() = prefs.getFloat(KEY_PLAYER_SPEED, 1.0f)
         set(value) = prefs.edit().putFloat(KEY_PLAYER_SPEED, value).apply()
@@ -658,6 +680,8 @@ class AppPrefs(context: Context) {
         private const val KEY_SUBTITLE_LANG = "subtitle_lang"
         private const val KEY_SUBTITLE_ENABLED_DEFAULT = "subtitle_enabled_default"
         private const val KEY_SUBTITLE_TEXT_SIZE_SP = "subtitle_text_size_sp"
+        private const val KEY_SUBTITLE_BOTTOM_PADDING_FRACTION = "subtitle_bottom_padding_fraction"
+        private const val KEY_SUBTITLE_BACKGROUND_OPACITY = "subtitle_background_opacity"
         private const val KEY_PLAYER_SPEED = "player_speed"
         private const val KEY_PLAYER_HOLD_SEEK_SPEED = "player_hold_seek_speed"
         private const val KEY_PLAYER_HOLD_SEEK_MODE = "player_hold_seek_mode"
@@ -713,6 +737,9 @@ class AppPrefs(context: Context) {
         const val PLAYER_HOLD_SEEK_MODE_SCRUB = "scrub"
         const val PLAYER_HOLD_SEEK_MODE_SCRUB_FIXED_TIME = "scrub_fixed_time"
         const val PLAYER_HOLD_SEEK_SPEED_DEFAULT = 3.0f
+
+        private const val SUBTITLE_BOTTOM_PADDING_FRACTION_DEFAULT = 0.16f
+        private const val SUBTITLE_BACKGROUND_OPACITY_DEFAULT = 34f / 255f
 
         const val PLAYER_OSD_BTN_PREV = "prev"
         const val PLAYER_OSD_BTN_PLAY_PAUSE = "play_pause"
