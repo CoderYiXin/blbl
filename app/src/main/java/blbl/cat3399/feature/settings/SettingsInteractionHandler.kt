@@ -1066,6 +1066,12 @@ class SettingsInteractionHandler(
 
             SettingId.PlayerCustomShortcuts -> showPlayerCustomShortcutsDialog(sectionIndex = state.currentSectionIndex, focusId = entry.id)
 
+            SettingId.LiveHighBitrateEnabled -> {
+                prefs.liveHighBitrateEnabled = !prefs.liveHighBitrateEnabled
+                AppToast.show(activity, "提高直播码率：${if (prefs.liveHighBitrateEnabled) "开" else "关"}")
+                renderer.refreshSection(entry.id)
+            }
+
             SettingId.PlayerDebugEnabled -> {
                 prefs.playerDebugEnabled = !prefs.playerDebugEnabled
                 renderer.refreshSection(entry.id)

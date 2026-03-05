@@ -13,6 +13,9 @@ internal object LiveApi {
     private const val LIVE_AREAS_CACHE_TTL_MS = 12 * 60 * 60 * 1000L // 12h
     private val LIVE_ORIGIN_INDEX_M3U8_REGEX = Regex("""(/live-bvc/\d+/live_\d+_\d+)(?:_[^/]+)?(/index\.m3u8)$""")
     private val LIVE_ORIGIN_M3U8_REGEX = Regex("""(/live-bvc/\d+/live_\d+_\d+)(?:_[^/\.]+)?(\.m3u8)$""")
+    // Issue #35: Prefer known-good origin hosts instead of rewriting every API host.
+    // Keep this list small and easy to extend.
+    private val LIVE_ORIGIN_HOST_OVERRIDES = listOf("https://d1--cn-gotcha204.bilivideo.com")
 
     private data class LiveAreasCache(
         val fetchedAtMs: Long,
@@ -298,27 +301,42 @@ internal object LiveApi {
             }.distinct()
         val baseUrl = codec.optString("base_url", "").trim()
         val urlInfo = codec.optJSONArray("url_info") ?: JSONArray()
+        val enableHighBitrate = BiliClient.prefs.liveHighBitrateEnabled
+        // Prefer the known-good origin host(s) first (higher bitrate), keep signed candidates as fallback.
+        // This is gated by prefs because some rooms/CDNs may reject the rewritten url.
+        val originUrls = ArrayList<String>(LIVE_ORIGIN_HOST_OVERRIDES.size + 1)
+        val signedUrls = ArrayList<String>(urlInfo.length() + 2)
+        val seen = HashSet<String>(urlInfo.length() * 2 + LIVE_ORIGIN_HOST_OVERRIDES.size * 2)
+
+        if (enableHighBitrate && baseUrl.isNotBlank()) {
+            for (overrideHost in LIVE_ORIGIN_HOST_OVERRIDES) {
+                val alt = tryBuildLiveOriginHlsUrl(host = overrideHost, baseUrl = baseUrl)
+                if (!alt.isNullOrBlank() && seen.add(alt)) originUrls.add(alt)
+            }
+        }
+
+        for (i in 0 until urlInfo.length()) {
+            val obj = urlInfo.optJSONObject(i) ?: continue
+            val host = obj.optString("host", "").trim()
+            val extra = obj.optString("extra", "").trim()
+            if (host.isBlank() || baseUrl.isBlank()) continue
+
+            val signed = host + baseUrl + extra
+            if (signed.isNotBlank() && seen.add(signed)) signedUrls.add(signed)
+        }
+
         val lines =
             buildList {
-                val seen = HashSet<String>(urlInfo.length() * 2)
                 var order = 1
-                for (i in 0 until urlInfo.length()) {
-                    val obj = urlInfo.optJSONObject(i) ?: continue
-                    val host = obj.optString("host", "").trim()
-                    val extra = obj.optString("extra", "").trim()
-                    if (host.isBlank() || baseUrl.isBlank()) continue
-
-                    val signed = host + baseUrl + extra
-                    val origin = tryBuildLiveOriginHlsUrl(host = host, baseUrl = baseUrl)
-
-                    if (!origin.isNullOrBlank() && seen.add(origin)) {
-                        add(BiliApi.LivePlayLine(order = order, url = origin))
+                if (enableHighBitrate) {
+                    for (u in originUrls) {
+                        add(BiliApi.LivePlayLine(order = order, url = u))
                         order += 1
                     }
-                    if (seen.add(signed)) {
-                        add(BiliApi.LivePlayLine(order = order, url = signed))
-                        order += 1
-                    }
+                }
+                for (u in signedUrls) {
+                    add(BiliApi.LivePlayLine(order = order, url = u))
+                    order += 1
                 }
             }
 

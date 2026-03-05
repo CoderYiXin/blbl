@@ -277,6 +277,12 @@ class SettingsRenderer(
                         null,
                     ),
                     SettingEntry(SettingId.PlayerCdnPreference, "CDN线路", SettingsText.cdnText(prefs.playerCdnPreference), null),
+                    SettingEntry(
+                        SettingId.LiveHighBitrateEnabled,
+                        "提高直播码率",
+                        if (prefs.liveHighBitrateEnabled) "开" else "关",
+                        "如果直播遇到问题,请关闭此功能",
+                    ),
                     SettingEntry(SettingId.PlayerDebugEnabled, "显示视频调试信息", if (prefs.playerDebugEnabled) "开" else "关", null),
                 )
 

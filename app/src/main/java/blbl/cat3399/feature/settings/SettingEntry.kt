@@ -32,6 +32,7 @@ enum class SettingId(
     PlayerPreferredQnPortrait("player_preferred_qn_portrait"),
     PlayerPreferredAudioId("player_preferred_audio_id"),
     PlayerCdnPreference("player_cdn_preference"),
+    LiveHighBitrateEnabled("live_high_bitrate_enabled"),
     PlayerSpeed("player_speed"),
     PlayerHoldSeekSpeed("player_hold_seek_speed"),
     PlayerHoldSeekMode("player_hold_seek_mode"),

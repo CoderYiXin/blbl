@@ -89,6 +89,9 @@ class LivePlayerActivity : BaseActivity() {
     private var autoFailoverSwitchCount: Int = 0
     private var autoFailoverLastSwitchAtMs: Long = 0L
     private var autoFailoverInFlight: Boolean = false
+    private var behindLiveWindowWindowStartAtMs: Long = 0L
+    private var behindLiveWindowRecoverCount: Int = 0
+    private var behindLiveWindowLastRecoverAtMs: Long = 0L
 
     private val doubleBackToExit by lazy {
         DoubleBackToExitHandler(context = this, windowMs = BACK_DOUBLE_PRESS_WINDOW_MS) {
@@ -186,10 +189,11 @@ class LivePlayerActivity : BaseActivity() {
             object : BlblPlayerEngine.Listener {
                 override fun onPlayerError(error: Throwable) {
                     AppLog.e("LivePlayer", "onPlayerError", error)
-                    val e = error as? PlaybackException
-                    if (e != null) {
-                        if (tryAutoFailoverOnError(e)) return
-                        AppToast.show(this@LivePlayerActivity, "播放失败：${e.errorCodeName}")
+                    val playbackException = error as? PlaybackException
+                    if (playbackException != null && tryRecoverBehindLiveWindow(playbackException)) return
+                    if (tryAutoFailoverOnError(error)) return
+                    if (playbackException != null) {
+                        AppToast.show(this@LivePlayerActivity, "播放失败：${playbackException.errorCodeName}")
                         return
                     }
                     AppToast.showLong(this@LivePlayerActivity, "播放失败：${error.message ?: "未知错误"}")
@@ -881,8 +885,9 @@ class LivePlayerActivity : BaseActivity() {
     }
 
     private fun shouldAutoFailoverOnError(error: PlaybackException): Boolean {
-        // Limit to IO/network errors where switching CDN host is likely to help.
+        // Limit to errors where switching CDN host (or resetting live edge) is likely to help.
         return when (error.errorCode) {
+            PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW,
             PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS,
             PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
             PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT,
@@ -891,14 +896,86 @@ class LivePlayerActivity : BaseActivity() {
         }
     }
 
-    private fun tryAutoFailoverOnError(error: PlaybackException): Boolean {
-        if (!shouldAutoFailoverOnError(error)) return false
+    private fun tryRecoverBehindLiveWindow(error: PlaybackException): Boolean {
+        if (error.errorCode != PlaybackException.ERROR_CODE_BEHIND_LIVE_WINDOW) return false
+        if (isFinishing || isDestroyed) return false
+        if (autoFailoverInFlight) return false
+
+        // BehindLiveWindowException is a timeline/window issue (not necessarily a bad url).
+        // Prefer self-heal by jumping back to the default live position before we start switching lines.
+        val engine = (player as? ExoPlayerEngine) ?: return false
+        val exo = engine.exoPlayer
+
+        val nowMs = SystemClock.elapsedRealtime()
+        if (behindLiveWindowWindowStartAtMs <= 0L || nowMs - behindLiveWindowWindowStartAtMs > BEHIND_LIVE_WINDOW_RECOVER_WINDOW_MS) {
+            behindLiveWindowWindowStartAtMs = nowMs
+            behindLiveWindowRecoverCount = 0
+        }
+        if (nowMs - behindLiveWindowLastRecoverAtMs < BEHIND_LIVE_WINDOW_RECOVER_MIN_INTERVAL_MS) return false
+        if (behindLiveWindowRecoverCount >= BEHIND_LIVE_WINDOW_MAX_RECOVERS) return false
+
+        behindLiveWindowRecoverCount += 1
+        behindLiveWindowLastRecoverAtMs = nowMs
+        val recoverCount = behindLiveWindowRecoverCount
+        AppLog.w("LivePlayer", "behindLiveWindow recover #$recoverCount")
+
+        if (recoverCount <= 1) {
+            runCatching { exo.seekToDefaultPosition() }
+            exo.prepare()
+            exo.playWhenReady = true
+            return true
+        }
+
+        val currentIndex = (session.lineOrder - 1).coerceAtLeast(0)
+        val url =
+            lastPlay?.lines?.getOrNull(currentIndex)?.url
+                ?: exo.currentMediaItem?.localConfiguration?.uri?.toString()
+        if (url.isNullOrBlank()) return false
+
+        runCatching { exo.stop() }
+        runCatching { engine.setSource(PlaybackSource.Live(url = url)) }
+        exo.prepare()
+        exo.playWhenReady = true
+        return true
+    }
+
+    private fun isSignedLiveUrl(url: String): Boolean {
+        val u = url.trim()
+        // Signed urls always carry query params like expires/sign/trid...
+        // Origin urls are normalized to a clean path (no query).
+        return u.contains('?')
+    }
+
+    private fun tryAutoFailoverOnError(error: Throwable): Boolean {
         if (isFinishing || isDestroyed) return false
         if (autoFailoverInFlight) return false
 
         val play = lastPlay ?: return false
         val lines = play.lines
         if (lines.size <= 1) return false
+
+        val currentIndex = (session.lineOrder - 1).coerceIn(0, lines.lastIndex)
+
+        val signedStartIndex =
+            lines.indexOfFirst { isSignedLiveUrl(it.url) }.let { idx ->
+                if (idx < 0) lines.size else idx.coerceIn(0, lines.size)
+            }
+        val originCount = signedStartIndex
+        val signedCount = (lines.size - signedStartIndex).coerceAtLeast(0)
+        val hasOrigin = originCount > 0
+        val hasSigned = signedCount > 0
+
+        // Decide whether we should auto failover for this error:
+        // - For ExoPlayer errors, only on IO/network failures.
+        // - For other engines (Ijk), we only auto-switch while trying origin urls.
+        val shouldFailover =
+            when (error) {
+                is PlaybackException -> shouldAutoFailoverOnError(error)
+                else ->
+                    // Keep it conservative to avoid endless loops on non-network errors.
+                    hasSigned && hasOrigin && currentIndex < signedStartIndex
+            }
+        if (!shouldFailover) return false
 
         val nowMs = SystemClock.elapsedRealtime()
         if (autoFailoverWindowStartAtMs <= 0L || nowMs - autoFailoverWindowStartAtMs > AUTO_FAILOVER_WINDOW_MS) {
@@ -911,13 +988,49 @@ class LivePlayerActivity : BaseActivity() {
         val maxSwitches = (lines.size - 1).coerceIn(1, AUTO_FAILOVER_MAX_SWITCHES)
         if (autoFailoverSwitchCount >= maxSwitches) return false
 
-        val currentIndex = (session.lineOrder - 1).coerceIn(0, lines.lastIndex)
-        val nextIndex = (currentIndex + 1) % lines.size
+        val inSigned = currentIndex >= signedStartIndex
+        val preferSigned = session.originFailCount >= ORIGIN_FAIL_BEFORE_SIGNED
+        val phaseSigned = inSigned || !hasOrigin || (preferSigned && hasSigned)
+
+        val nextIndex =
+            if (!phaseSigned) {
+                // Origin phase: count failures; once we hit threshold (or exhaust origin), switch to signed.
+                if (originCount <= 1) {
+                    if (!hasSigned) return false
+                    signedStartIndex
+                } else {
+                val nextOriginIndex = currentIndex + 1
+                val reachEnd = nextOriginIndex >= originCount
+                val switchToSigned =
+                    hasSigned &&
+                        (session.originFailCount + 1 >= ORIGIN_FAIL_BEFORE_SIGNED || reachEnd)
+                when {
+                    switchToSigned -> signedStartIndex
+                    nextOriginIndex in 0 until originCount -> nextOriginIndex
+                    else -> 0
+                }
+                }
+            } else {
+                // Signed phase: only rotate inside signed urls.
+                if (!hasSigned) return false
+                if (currentIndex < signedStartIndex) {
+                    signedStartIndex
+                } else {
+                    if (signedCount <= 1) return false
+                    val nextSignedIndex = currentIndex + 1
+                    if (nextSignedIndex < lines.size) nextSignedIndex else signedStartIndex
+                }
+            }
         if (nextIndex == currentIndex) return false
 
         val fromOrder = lines[currentIndex].order
         val toOrder = lines[nextIndex].order
-        AppLog.w("LivePlayer", "autoFailover error=${error.errorCodeName} line=$fromOrder -> $toOrder")
+        val errorLabel =
+            when (error) {
+                is PlaybackException -> error.errorCodeName
+                else -> error::class.java.simpleName
+            }
+        AppLog.w("LivePlayer", "autoFailover error=$errorLabel line=$fromOrder -> $toOrder")
 
         autoFailoverSwitchCount += 1
         autoFailoverLastSwitchAtMs = nowMs
@@ -927,7 +1040,17 @@ class LivePlayerActivity : BaseActivity() {
         // Stop current load attempts to avoid duplicate error callbacks while we are switching.
         runCatching { player?.stop() }
 
-        session = session.copy(lineOrder = nextIndex + 1)
+        session =
+            if (!phaseSigned) {
+                val nextFail = (session.originFailCount + 1).coerceAtLeast(0)
+                val switchedToSigned = nextIndex >= signedStartIndex && hasSigned
+                session.copy(
+                    lineOrder = nextIndex + 1,
+                    originFailCount = if (switchedToSigned) ORIGIN_FAIL_BEFORE_SIGNED else nextFail,
+                )
+            } else {
+                session.copy(lineOrder = nextIndex + 1)
+            }
         refreshSettings()
         AppToast.show(this, "线路 $fromOrder 失败，尝试线路 $toOrder")
 
@@ -963,6 +1086,17 @@ class LivePlayerActivity : BaseActivity() {
                 // If saved lineOrder becomes out of range (API may return fewer lines), fall back to line 1.
                 val safeLineOrder = session.lineOrder.takeIf { it in 1..play.lines.size } ?: 1
                 if (safeLineOrder != session.lineOrder) session = session.copy(lineOrder = safeLineOrder)
+                if (session.originFailCount >= ORIGIN_FAIL_BEFORE_SIGNED) {
+                    val signedStartIndex =
+                        play.lines.indexOfFirst { isSignedLiveUrl(it.url) }.let { idx ->
+                            if (idx < 0) play.lines.size else idx.coerceIn(0, play.lines.size)
+                        }
+                    val signedStartOrder = signedStartIndex + 1
+                    // Keep current signed selection when possible; otherwise jump to the first signed url.
+                    if (signedStartIndex in play.lines.indices && session.lineOrder < signedStartOrder) {
+                        session = session.copy(lineOrder = signedStartOrder)
+                    }
+                }
             }
             refreshSettings()
 
@@ -1087,8 +1221,7 @@ class LivePlayerActivity : BaseActivity() {
             checkedIndex = checked,
         ) { which, _ ->
             val picked = optionsAvailable.getOrNull(which) ?: return@singleChoice
-            session = session.copy(targetQn = picked)
-            session = session.copy(lineOrder = 1) // reset line
+            session = session.copy(targetQn = picked, lineOrder = 1, originFailCount = 0)
             refreshSettings()
             lifecycleScope.launch { loadAndPlay(initial = false) }
         }
@@ -1113,7 +1246,13 @@ class LivePlayerActivity : BaseActivity() {
             checkedIndex = checked,
         ) { which, _ ->
             val picked = lines.getOrNull(which) ?: return@singleChoice
-            session = session.copy(lineOrder = picked.order)
+            session =
+                if (isSignedLiveUrl(picked.url)) {
+                    session.copy(lineOrder = picked.order)
+                } else {
+                    // User explicitly chooses an origin line: allow retrying origin mode.
+                    session.copy(lineOrder = picked.order, originFailCount = 0)
+                }
             refreshSettings()
             lifecycleScope.launch { loadAndPlay(initial = false) }
         }
@@ -1237,6 +1376,7 @@ class LivePlayerActivity : BaseActivity() {
     private data class LiveSession(
         val targetQn: Int = LIVE_QN_ORIGINAL,
         val lineOrder: Int = 1,
+        val originFailCount: Int = 0,
         val danmaku: DanmakuSessionSettings =
             DanmakuSessionSettings(
                 enabled = BiliClient.prefs.danmakuEnabled,
@@ -1258,6 +1398,10 @@ class LivePlayerActivity : BaseActivity() {
         private const val BACK_DOUBLE_PRESS_WINDOW_MS = 2_500L
         private const val AUTO_FAILOVER_WINDOW_MS = 12_000L
         private const val AUTO_FAILOVER_MIN_INTERVAL_MS = 1_200L
-        private const val AUTO_FAILOVER_MAX_SWITCHES = 4
+        private const val AUTO_FAILOVER_MAX_SWITCHES = 6
+        private const val ORIGIN_FAIL_BEFORE_SIGNED = 5
+        private const val BEHIND_LIVE_WINDOW_RECOVER_WINDOW_MS = 15_000L
+        private const val BEHIND_LIVE_WINDOW_RECOVER_MIN_INTERVAL_MS = 1_200L
+        private const val BEHIND_LIVE_WINDOW_MAX_RECOVERS = 2
     }
 }

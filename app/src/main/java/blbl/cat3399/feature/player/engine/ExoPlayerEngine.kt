@@ -20,9 +20,16 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
+import androidx.media3.exoplayer.hls.HlsMediaSource
+import androidx.media3.exoplayer.hls.playlist.DefaultHlsPlaylistParserFactory
+import androidx.media3.exoplayer.hls.playlist.HlsMediaPlaylist
+import androidx.media3.exoplayer.hls.playlist.HlsMultivariantPlaylist
+import androidx.media3.exoplayer.hls.playlist.HlsPlaylist
+import androidx.media3.exoplayer.hls.playlist.HlsPlaylistParserFactory
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.upstream.ParsingLoadable
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.feature.player.CdnFailoverDataSourceFactory
 import blbl.cat3399.feature.player.CdnFailoverState
@@ -30,6 +37,8 @@ import blbl.cat3399.feature.player.DebugStreamKind
 import blbl.cat3399.feature.player.Playable
 import blbl.cat3399.feature.player.AudioBalanceLevel
 import okhttp3.OkHttpClient
+import java.io.ByteArrayInputStream
+import java.io.InputStream
 import java.util.Locale
 import java.util.concurrent.CopyOnWriteArraySet
 
@@ -42,6 +51,7 @@ internal class ExoPlayerEngine(
     private val appContext: Context = context.applicationContext
 
     private val volumeBalanceProcessor = VolumeBalanceAudioProcessor(level = audioBalanceLevel)
+    private val liveHlsPlaylistParserFactory: HlsPlaylistParserFactory = ExtXStartStrippingHlsPlaylistParserFactory()
 
     val exoPlayer: ExoPlayer =
         ExoPlayer.Builder(context, BlblRenderersFactory(context.applicationContext, volumeBalanceProcessor))
@@ -135,10 +145,22 @@ internal class ExoPlayerEngine(
             }
 
             is PlaybackSource.Live -> {
+                val url = source.url.trim()
+                val uri = Uri.parse(url)
                 val factory = OkHttpDataSource.Factory(okHttpClient)
-                val mediaSourceFactory = DefaultMediaSourceFactory(factory)
-                val mediaSource = mediaSourceFactory.createMediaSource(MediaItem.fromUri(Uri.parse(source.url)))
-                exoPlayer.setMediaSource(mediaSource)
+
+                val isM3u8 = url.substringBefore('?').trim().lowercase(Locale.US).endsWith(".m3u8")
+                if (isM3u8) {
+                    val hlsSource =
+                        HlsMediaSource.Factory(factory)
+                            .setPlaylistParserFactory(liveHlsPlaylistParserFactory)
+                            .createMediaSource(MediaItem.fromUri(uri))
+                    exoPlayer.setMediaSource(hlsSource)
+                } else {
+                    val mediaSourceFactory = DefaultMediaSourceFactory(factory)
+                    val mediaSource = mediaSourceFactory.createMediaSource(MediaItem.fromUri(uri))
+                    exoPlayer.setMediaSource(mediaSource)
+                }
             }
         }
     }
@@ -252,6 +274,40 @@ internal class ExoPlayerEngine(
                 exoPlayer.setMediaSource(buildProgressive(mainFactory, playable.url, subtitle))
             }
         }
+    }
+}
+
+private class ExtXStartStrippingHlsPlaylistParserFactory(
+    private val delegate: HlsPlaylistParserFactory = DefaultHlsPlaylistParserFactory(),
+) : HlsPlaylistParserFactory {
+    override fun createPlaylistParser(): ParsingLoadable.Parser<HlsPlaylist> {
+        return ExtXStartStrippingParser(delegate.createPlaylistParser())
+    }
+
+    override fun createPlaylistParser(
+        multivariantPlaylist: HlsMultivariantPlaylist,
+        previousMediaPlaylist: HlsMediaPlaylist?,
+    ): ParsingLoadable.Parser<HlsPlaylist> {
+        return ExtXStartStrippingParser(delegate.createPlaylistParser(multivariantPlaylist, previousMediaPlaylist))
+    }
+}
+
+private class ExtXStartStrippingParser(
+    private val delegate: ParsingLoadable.Parser<HlsPlaylist>,
+) : ParsingLoadable.Parser<HlsPlaylist> {
+    override fun parse(uri: Uri, inputStream: InputStream): HlsPlaylist {
+        val bytes = inputStream.readBytes()
+        val text = String(bytes, Charsets.UTF_8)
+        if (!text.contains("#EXT-X-START", ignoreCase = true)) {
+            return delegate.parse(uri, ByteArrayInputStream(bytes))
+        }
+
+        val filtered =
+            text
+                .lineSequence()
+                .filterNot { it.trimStart().startsWith("#EXT-X-START", ignoreCase = true) }
+                .joinToString("\n")
+        return delegate.parse(uri, ByteArrayInputStream(filtered.toByteArray(Charsets.UTF_8)))
     }
 }
 
