@@ -29,8 +29,14 @@ internal class VolumeBalanceAudioProcessor(
     private var channelCount: Int = 2
     private var inputEncoding: Int = C.ENCODING_PCM_16BIT
     private var signalAccumulatedSec: Double = 0.0
-    private var rmsEmaDb: Double? = null
+    private var calibrationSumSquares: Double = 0.0
+    private var calibrationSampleCount: Long = 0L
+    private var programMeanSquare: Double? = null
     private var currentGain: Float = 1.0f
+
+    init {
+        resetAdaptiveState()
+    }
 
     fun setLevel(level: AudioBalanceLevel) {
         if (this.level == level) return
@@ -93,7 +99,8 @@ internal class VolumeBalanceAudioProcessor(
                 }
             }
         }
-        val rms = sqrt(sumSquares / sampleCount.toDouble())
+        val meanSquare = (sumSquares / sampleCount.toDouble()).coerceAtLeast(0.0)
+        val rms = sqrt(meanSquare)
         val rmsDb = if (rms > 0.0) (20.0 * log10(rms)) else -120.0
 
         val sr = sampleRateHz.coerceAtLeast(8_000)
@@ -102,22 +109,27 @@ internal class VolumeBalanceAudioProcessor(
         val dtSec = frameCount.toDouble() / sr.toDouble()
 
         if (rmsDb > p.silenceGateDb) {
-            val a = alphaForTimeConstant(dtSec, p.rmsIntegrationSec)
-            val prev = rmsEmaDb
-            rmsEmaDb =
-                if (prev == null) {
-                    rmsDb
-                } else {
-                    prev + (a * (rmsDb - prev))
-                }
             signalAccumulatedSec += dtSec
+            if (programMeanSquare == null) {
+                calibrationSumSquares += sumSquares
+                calibrationSampleCount += sampleCount.toLong()
+                if (signalAccumulatedSec >= p.calibrationSignalSec && calibrationSampleCount > 0L) {
+                    programMeanSquare = calibrationSumSquares / calibrationSampleCount.toDouble()
+                }
+            } else {
+                val prev = programMeanSquare ?: meanSquare
+                val a = alphaForTimeConstant(dtSec, p.programIntegrationSec)
+                programMeanSquare = prev + (a * (meanSquare - prev))
+            }
         }
 
         val desiredGainDb =
-            if (rmsEmaDb == null || signalAccumulatedSec < WARMUP_SIGNAL_SEC) {
-                0.0
+            if (programMeanSquare == null) {
+                p.startupGainDb
             } else {
-                (TARGET_RMS_DB - (rmsEmaDb ?: TARGET_RMS_DB)).coerceIn(p.minGainDb, p.maxGainDb)
+                val programRms = sqrt((programMeanSquare ?: MIN_MEAN_SQUARE).coerceAtLeast(MIN_MEAN_SQUARE))
+                val programRmsDb = 20.0 * log10(programRms)
+                (TARGET_RMS_DB - programRmsDb).coerceIn(p.minGainDb, p.maxGainDb)
             }
         val desiredGainLinear = dbToLinear(desiredGainDb)
 
@@ -187,17 +199,22 @@ internal class VolumeBalanceAudioProcessor(
 
     private fun resetAdaptiveState() {
         signalAccumulatedSec = 0.0
-        rmsEmaDb = null
-        currentGain = 1.0f
+        calibrationSumSquares = 0.0
+        calibrationSampleCount = 0L
+        programMeanSquare = null
+        currentGain = if (level == AudioBalanceLevel.Off) 1.0f else params.startupGainLinear
     }
 
     private data class Params(
+        val startupGainDb: Double,
         val maxGainDb: Double,
         val minGainDb: Double,
         val silenceGateDb: Double,
-        val rmsIntegrationSec: Double,
+        val calibrationSignalSec: Double,
+        val programIntegrationSec: Double,
         val gainAttackSec: Double,
         val gainReleaseSec: Double,
+        val startupGainLinear: Float,
         val maxGainLinear: Float,
         val minGainLinear: Float,
     )
@@ -205,71 +222,85 @@ internal class VolumeBalanceAudioProcessor(
     private companion object {
         private const val TARGET_RMS_DB = -20.0
 
-        // Warm up on actual signal before applying any gain changes.
-        private const val WARMUP_SIGNAL_SEC = 0.25
-
         // Hard ceiling to avoid clipping.
         private const val LIMITER_CEILING = 0.98f
+        private const val MIN_MEAN_SQUARE = 1.0e-12
 
         private fun paramsFor(level: AudioBalanceLevel): Params {
-            // Safety first:
-            // - Keep max amplification small (avoid "sudden loud").
-            // - Allow stronger attenuation for higher levels (tame loud videos more).
-            // - Rising gain is always slow; falling gain is faster.
+            // Start a little quieter, calibrate on the first few seconds of actual signal,
+            // then only drift slowly so speech does not pump within a sentence.
+            val startupGainDb =
+                when (level) {
+                    AudioBalanceLevel.High -> -3.0
+                    AudioBalanceLevel.Medium -> -1.5
+                    AudioBalanceLevel.Low -> -0.5
+                    AudioBalanceLevel.Off -> 0.0
+                }
             val maxGainDb =
                 when (level) {
-                    AudioBalanceLevel.High -> 3.0
-                    AudioBalanceLevel.Medium -> 3.0
-                    AudioBalanceLevel.Low -> 1.5
+                    AudioBalanceLevel.High -> 2.5
+                    AudioBalanceLevel.Medium -> 2.0
+                    AudioBalanceLevel.Low -> 1.0
                     AudioBalanceLevel.Off -> 0.0
                 }
             val minGainDb =
                 when (level) {
-                    AudioBalanceLevel.High -> -24.0
-                    AudioBalanceLevel.Medium -> -18.0
-                    AudioBalanceLevel.Low -> -12.0
+                    AudioBalanceLevel.High -> -16.0
+                    AudioBalanceLevel.Medium -> -12.0
+                    AudioBalanceLevel.Low -> -8.0
                     AudioBalanceLevel.Off -> 0.0
                 }
 
             val silenceGateDb =
                 when (level) {
-                    AudioBalanceLevel.High -> -57.0
-                    AudioBalanceLevel.Medium -> -55.0
-                    AudioBalanceLevel.Low -> -52.0
+                    AudioBalanceLevel.High -> -55.0
+                    AudioBalanceLevel.Medium -> -53.0
+                    AudioBalanceLevel.Low -> -50.0
                     AudioBalanceLevel.Off -> -120.0
                 }
 
-            val rmsIntegrationSec =
+            val calibrationSignalSec =
                 when (level) {
-                    AudioBalanceLevel.High -> 0.25
-                    AudioBalanceLevel.Medium -> 0.40
-                    AudioBalanceLevel.Low -> 0.60
-                    AudioBalanceLevel.Off -> 0.40
+                    AudioBalanceLevel.High -> 1.5
+                    AudioBalanceLevel.Medium -> 2.0
+                    AudioBalanceLevel.Low -> 2.5
+                    AudioBalanceLevel.Off -> 0.0
+                }
+
+            val programIntegrationSec =
+                when (level) {
+                    AudioBalanceLevel.High -> 6.0
+                    AudioBalanceLevel.Medium -> 8.0
+                    AudioBalanceLevel.Low -> 10.0
+                    AudioBalanceLevel.Off -> 0.0
                 }
 
             val attackSec =
                 when (level) {
-                    AudioBalanceLevel.High -> 0.03
-                    AudioBalanceLevel.Medium -> 0.05
-                    AudioBalanceLevel.Low -> 0.08
+                    AudioBalanceLevel.High -> 1.5
+                    AudioBalanceLevel.Medium -> 2.0
+                    AudioBalanceLevel.Low -> 3.0
                     AudioBalanceLevel.Off -> 0.05
                 }
 
             val releaseSec =
                 when (level) {
-                    AudioBalanceLevel.High -> 1.40
-                    AudioBalanceLevel.Medium -> 1.20
-                    AudioBalanceLevel.Low -> 1.60
+                    AudioBalanceLevel.High -> 5.0
+                    AudioBalanceLevel.Medium -> 6.0
+                    AudioBalanceLevel.Low -> 8.0
                     AudioBalanceLevel.Off -> 1.20
                 }
 
             return Params(
+                startupGainDb = startupGainDb,
                 maxGainDb = maxGainDb,
                 minGainDb = minGainDb,
                 silenceGateDb = silenceGateDb,
-                rmsIntegrationSec = rmsIntegrationSec,
+                calibrationSignalSec = calibrationSignalSec,
+                programIntegrationSec = programIntegrationSec,
                 gainAttackSec = attackSec,
                 gainReleaseSec = releaseSec,
+                startupGainLinear = dbToLinear(startupGainDb),
                 maxGainLinear = dbToLinear(maxGainDb),
                 minGainLinear = dbToLinear(minGainDb),
             )
