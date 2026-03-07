@@ -417,6 +417,8 @@ class AppPrefs(context: Context) {
                 PLAYER_DOWN_KEY_OSD_FOCUS_NEXT,
                 PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE,
                 PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU,
+                PLAYER_DOWN_KEY_OSD_FOCUS_COMMENTS,
+                PLAYER_DOWN_KEY_OSD_FOCUS_DETAIL,
                 PLAYER_DOWN_KEY_OSD_FOCUS_UP,
                 PLAYER_DOWN_KEY_OSD_FOCUS_LIKE,
                 PLAYER_DOWN_KEY_OSD_FOCUS_COIN,
@@ -436,6 +438,8 @@ class AppPrefs(context: Context) {
                     PLAYER_DOWN_KEY_OSD_FOCUS_NEXT,
                     PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE,
                     PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_COMMENTS,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_DETAIL,
                     PLAYER_DOWN_KEY_OSD_FOCUS_UP,
                     PLAYER_DOWN_KEY_OSD_FOCUS_LIKE,
                     PLAYER_DOWN_KEY_OSD_FOCUS_COIN,
@@ -801,6 +805,8 @@ class AppPrefs(context: Context) {
         const val PLAYER_DOWN_KEY_OSD_FOCUS_NEXT = "next"
         const val PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE = "subtitle"
         const val PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU = "danmaku"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_COMMENTS = "comments"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_DETAIL = "detail"
         const val PLAYER_DOWN_KEY_OSD_FOCUS_UP = "up"
         const val PLAYER_DOWN_KEY_OSD_FOCUS_LIKE = "like"
         const val PLAYER_DOWN_KEY_OSD_FOCUS_COIN = "coin"

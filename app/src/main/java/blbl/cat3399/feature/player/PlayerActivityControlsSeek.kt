@@ -234,6 +234,8 @@ internal fun PlayerActivity.focusDownKeyOsdTargetControl() {
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_NEXT -> binding.btnNext
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_SUBTITLE -> binding.btnSubtitle
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_DANMAKU -> binding.btnDanmaku
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_COMMENTS -> binding.btnComments
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_DETAIL -> binding.btnDetail
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_UP -> binding.btnUp
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_LIKE -> binding.btnLike
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_COIN -> binding.btnCoin
