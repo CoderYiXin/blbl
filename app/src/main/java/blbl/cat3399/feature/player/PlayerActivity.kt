@@ -624,6 +624,9 @@ class PlayerActivity : BaseActivity() {
         updatePersistentBottomProgressBarVisibility()
         binding.tvSeekHint.visibility = View.GONE
         binding.btnBack.setOnClickListener { finish() }
+        // Touch-only back button: keep click, but never allow DPAD focus.
+        binding.btnBack.isFocusable = false
+        binding.btnBack.isFocusableInTouchMode = false
         binding.tvOnline.text = "-人正在观看"
         binding.llTitleMeta.visibility = View.VISIBLE
         binding.tvViewCount.text = "-"
@@ -1209,6 +1212,9 @@ class PlayerActivity : BaseActivity() {
         PlayerOsdSizing.applyTheme(this)
         PlayerUiMode.applyVideo(this, binding)
         applyOsdButtonsVisibility()
+        // Defensive: ensure back stays non-focusable after any theme/UI refresh.
+        binding.btnBack.isFocusable = false
+        binding.btnBack.isFocusableInTouchMode = false
         updatePersistentBottomProgressBarVisibility()
         (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.let { refreshSettings(it) }
     }
