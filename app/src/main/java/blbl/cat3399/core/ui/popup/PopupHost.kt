@@ -270,7 +270,12 @@ internal class PopupHost private constructor(
             tv.text = a.text
             btn.setOnClickListener {
                 a.onClick?.invoke()
-                if (a.dismissOnClick) dismissModal()
+                if (a.dismissOnClick) {
+                    // If the click handler opened/replaced the modal, do not dismiss the new one.
+                    // Only dismiss if this modal is still the current modal.
+                    val current = modalEntry
+                    if (current != null && current.rootView === overlay) dismissModal()
+                }
             }
             val lp =
                 (btn.layoutParams as? ViewGroup.MarginLayoutParams)
@@ -485,15 +490,20 @@ internal class PopupHost private constructor(
             runCatching { (root.parent as? ViewGroup)?.removeView(root) }
         }
 
-        root.animate().cancel()
-        card.animate().cancel()
-
         if (!animate) {
+            root.animate().cancel()
+            card.animate().cancel()
             finalizeDismiss()
             return
         }
 
+        // Idempotency: if we are already dismissing, do not cancel the running animations.
+        // Canceling the animator would also cancel its end-action, leaving an invisible but
+        // still-attached overlay that blocks all input.
         if (entry.dismissing) return
+
+        root.animate().cancel()
+        card.animate().cancel()
         entry.dismissing = true
 
         if (restoreFocus) {
@@ -518,6 +528,15 @@ internal class PopupHost private constructor(
                 finalizeDismiss()
             }
             .start()
+
+        // Fallback: in rare cases the end-action may not fire (e.g. animation canceled externally).
+        // Ensure we eventually tear down the modal so it cannot block input forever.
+        mainHandler.postDelayed(
+            {
+                if (modalEntry === entry) finalizeDismiss()
+            },
+            /* delayMillis = */ 220L,
+        )
     }
 
     private fun checkMainThread() {
