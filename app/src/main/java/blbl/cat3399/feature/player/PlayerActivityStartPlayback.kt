@@ -24,7 +24,10 @@ import blbl.cat3399.core.api.BiliApiException
 import blbl.cat3399.core.prefs.AppPrefs
 import kotlinx.coroutines.withContext
 
-internal fun PlayerActivity.resetPlaybackStateForNewMedia(engine: BlblPlayerEngine) {
+internal fun PlayerActivity.resetPlaybackStateForNewMedia(
+    engine: BlblPlayerEngine,
+    preservePartsList: Boolean,
+) {
     cancelPlayUrlAutoRefresh(reason = "new_media")
     traceFirstFrameLogged = false
     lastAvailableQns = emptyList()
@@ -63,10 +66,12 @@ internal fun PlayerActivity.resetPlaybackStateForNewMedia(engine: BlblPlayerEngi
     actionFavored = false
     updateActionButtonsUi()
 
-    partsListSource = null
-    partsListItems = emptyList()
-    partsListUiCards = emptyList()
-    partsListIndex = -1
+    if (!preservePartsList) {
+        partsListSource = null
+        partsListItems = emptyList()
+        partsListUiCards = emptyList()
+        partsListIndex = -1
+    }
 
     relatedVideosFetchJob?.cancel()
     relatedVideosFetchJob = null
@@ -102,7 +107,7 @@ internal fun PlayerActivity.resetPlaybackStateForNewMedia(engine: BlblPlayerEngi
     (binding.recyclerCommentThread.adapter as? PlayerCommentsAdapter)?.setItems(emptyList())
 
     playbackConstraints = PlaybackConstraints()
-    decodeFallbackAttempted = false
+    decodeFallbackAttemptCount = 0
     lastPickedDash = null
     engine.stop()
     (engine as? ExoPlayerEngine)?.exoPlayer?.let { applySubtitleEnabled(it) }
@@ -179,7 +184,10 @@ internal fun PlayerActivity.startPlayback(
     binding.llViewMeta.visibility = View.VISIBLE
     binding.tvPubdate.text = ""
     binding.tvPubdate.visibility = View.GONE
-    resetPlaybackStateForNewMedia(engine)
+    resetPlaybackStateForNewMedia(
+        engine = engine,
+        preservePartsList = startFromList == PlayerVideoListKind.PARTS,
+    )
 
     updatePlaylistControls()
 
@@ -250,7 +258,9 @@ internal fun PlayerActivity.startPlayback(
                 AppLog.i("Player", "start bvid=$resolvedBvid cid=$cid")
                 trace?.log("cid:resolved", "cid=$cid aid=${aid ?: -1}")
 
-                refreshPartsListFromView(viewData, bvid = resolvedBvid)
+                if (startFromList != PlayerVideoListKind.PARTS || partsListItems.isEmpty() || partsListIndex !in partsListItems.indices) {
+                    refreshPartsListFromView(viewData, bvid = resolvedBvid)
+                }
                 if (startFromList == PlayerVideoListKind.PAGE) {
                     updatePageListIndexForCurrentMedia(bvid = resolvedBvid, aid = currentAid, cid = cid)
                 }
@@ -264,7 +274,7 @@ internal fun PlayerActivity.startPlayback(
                         val (qn, fnval) = playUrlParamsForSession()
                         trace?.log("playurl:start", "qn=$qn fnval=$fnval")
                         playbackConstraints = PlaybackConstraints()
-                        decodeFallbackAttempted = false
+                        decodeFallbackAttemptCount = 0
                         lastPickedDash = null
                         loadPlayableWithTryLookFallback(
                             bvid = resolvedBvid,

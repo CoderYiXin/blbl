@@ -260,7 +260,7 @@ internal class ExoPlayerEngine(
                 .createMediaSource(
                     MediaItem.Builder().setUri(Uri.parse(audioUrl)).build(),
                 )
-        return MergingMediaSource(videoSource, audioSource)
+        return MergingMediaSource(true, true, videoSource, audioSource)
     }
 
     private fun buildProgressive(factory: DataSource.Factory, url: String, subtitle: MediaItem.SubtitleConfiguration?): MediaSource {

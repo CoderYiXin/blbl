@@ -247,7 +247,7 @@ class PlayerActivity : BaseActivity() {
     private var danmakuLoadGeneration: Int = 0
     private var lastDanmakuPrefetchAtMs: Long = 0L
     internal var playbackConstraints: PlaybackConstraints = PlaybackConstraints()
-    internal var decodeFallbackAttempted: Boolean = false
+    internal var decodeFallbackAttemptCount: Int = 0
     internal var lastPickedDash: Playable.Dash? = null
     internal var autoResumeToken: Int = 0
     internal var autoResumeCancelledByUser: Boolean = false
@@ -792,15 +792,19 @@ class PlayerActivity : BaseActivity() {
                         val picked = lastPickedDash
                         if (
                             picked != null &&
-                            !decodeFallbackAttempted &&
                             picked.shouldAttemptDolbyFallback() &&
-                            isLikelyCodecUnsupported(playbackException)
+                            shouldAttemptHighSpecFallback(playbackException) &&
+                            decodeFallbackAttemptCount < HIGH_SPEC_FALLBACK_MAX_ATTEMPTS
                         ) {
                             val nextConstraints = nextPlaybackConstraintsForDolbyFallback(picked)
                             if (nextConstraints != null) {
-                                decodeFallbackAttempted = true
+                                decodeFallbackAttemptCount++
                                 playbackConstraints = nextConstraints
-                                AppToast.show(this@PlayerActivity, "杜比/无损解码失败，尝试回退到普通轨道…")
+                                trace?.log(
+                                    "player:fallback",
+                                    "attempt=$decodeFallbackAttemptCount/${HIGH_SPEC_FALLBACK_MAX_ATTEMPTS} type=${playbackException.errorCodeName} to=$nextConstraints",
+                                )
+                                AppToast.show(this@PlayerActivity, "杜比/无损播放失败，尝试回退到普通轨道…")
                                 reloadStream(keepPosition = true, resetConstraints = false)
                                 return
                             }
@@ -2106,15 +2110,40 @@ class PlayerActivity : BaseActivity() {
         isDolbyVision || audioKind == DashAudioKind.DOLBY || audioKind == DashAudioKind.FLAC
 
     private fun nextPlaybackConstraintsForDolbyFallback(picked: Playable.Dash): PlaybackConstraints? {
-        if (picked.isDolbyVision && playbackConstraints.allowDolbyVision) return playbackConstraints.copy(allowDolbyVision = false)
-        if (picked.audioKind == DashAudioKind.DOLBY && playbackConstraints.allowDolbyAudio) return playbackConstraints.copy(allowDolbyAudio = false)
         if (picked.audioKind == DashAudioKind.FLAC && playbackConstraints.allowFlacAudio) return playbackConstraints.copy(allowFlacAudio = false)
+        if (picked.audioKind == DashAudioKind.DOLBY && playbackConstraints.allowDolbyAudio) return playbackConstraints.copy(allowDolbyAudio = false)
+        if (picked.isDolbyVision && playbackConstraints.allowDolbyVision) return playbackConstraints.copy(allowDolbyVision = false)
         return null
     }
 
-    private fun isLikelyCodecUnsupported(error: PlaybackException): Boolean {
-        val name = error.errorCodeName.uppercase(Locale.US)
-        return name.contains("DECOD") || name.contains("DECODER") || name.contains("FORMAT")
+    private fun shouldAttemptHighSpecFallback(error: PlaybackException): Boolean {
+        return when (error.errorCode) {
+            PlaybackException.ERROR_CODE_FAILED_RUNTIME_CHECK,
+            PlaybackException.ERROR_CODE_NOT_SUPPORTED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
+            PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_DECODER_INIT_FAILED,
+            PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FAILED,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES,
+            PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED,
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED,
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_WRITE_FAILED,
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_INIT_FAILED,
+            PlaybackException.ERROR_CODE_AUDIO_TRACK_OFFLOAD_WRITE_FAILED,
+            -> true
+
+            else -> {
+                val name = error.errorCodeName.uppercase(Locale.US)
+                name.contains("FAILED_RUNTIME_CHECK") ||
+                    name.contains("DECOD") ||
+                    name.contains("DECODER") ||
+                    name.contains("FORMAT") ||
+                    name.contains("AUDIO_TRACK") ||
+                    name.contains("NOT_SUPPORTED") ||
+                    name.contains("PARSING")
+            }
+        }
     }
 
     private fun maybeReloadExpiredUrlAfterResume(error: PlaybackException, httpCode: Int?): Boolean {
@@ -2642,7 +2671,7 @@ class PlayerActivity : BaseActivity() {
                 val (qn, fnval) = playUrlParamsForSession()
                 if (resetConstraints) {
                     playbackConstraints = PlaybackConstraints()
-                    decodeFallbackAttempted = false
+                    decodeFallbackAttemptCount = 0
                     lastPickedDash = null
                 }
                 val (playJson, playable) =
@@ -3137,6 +3166,7 @@ class PlayerActivity : BaseActivity() {
     }
 
     companion object {
+        private const val HIGH_SPEC_FALLBACK_MAX_ATTEMPTS = 3
         private const val EXIT_TRACE_PREFIX = "EXIT_TRACE"
         const val EXTRA_BVID = "bvid"
         const val EXTRA_CID = "cid"
