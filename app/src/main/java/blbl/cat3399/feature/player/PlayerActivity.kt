@@ -551,6 +551,13 @@ class PlayerActivity : BaseActivity() {
 
     private fun enqueueExitProgressReport(reason: String) {
         val trace = trace
+        // If auto-resume is pending, the player is briefly at position ~= 0.
+        // Reporting during this window can overwrite server-side history to "1s" and cause a restart-from-beginning loop
+        // after Activity recreation.
+        if (autoResumeHintVisible) {
+            trace?.log("report:skip", "autoResumeHint=1 reason=$reason")
+            return
+        }
         val exo = player ?: return
         val progressSec = (exo.currentPosition.coerceAtLeast(0L) / 1000L)
 
@@ -2040,6 +2047,11 @@ class PlayerActivity : BaseActivity() {
         if (!shouldReportAnyProgressNow()) return
         val token = reportToken
         val exo = player ?: return
+        // Prevent a premature "sec=1" report when auto-resume is about to seek to the real position.
+        if (autoResumeHintVisible) {
+            trace?.log("report:skip", "autoResumeHint=1 reason=$reason force=${if (force) 1 else 0}")
+            return
+        }
         val cid = currentCid
         val aid = currentAid
         val epId = currentEpId
