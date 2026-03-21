@@ -209,7 +209,7 @@
         app:layout_constraintStart_toStartOf="@id/tv_title"
         app:layout_constraintTop_toBottomOf="@id/card_tab" />
 
-    <com.google.android.material.card.MaterialCardView
+    <blbl.cat3399.feature.player.HoldProgressCardView
         android:id="@+id/btn_like"
         android:layout_width="48dp"
         android:layout_height="48dp"
@@ -234,7 +234,7 @@
             android:padding="10dp"
             android:src="@drawable/ic_action_like"
             app:tint="?android:attr/textColorSecondary" />
-    </com.google.android.material.card.MaterialCardView>
+    </blbl.cat3399.feature.player.HoldProgressCardView>
 
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/btn_coin"

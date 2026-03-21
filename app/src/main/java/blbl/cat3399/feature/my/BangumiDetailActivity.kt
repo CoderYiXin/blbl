@@ -146,6 +146,7 @@ class BangumiDetailActivity : BaseActivity() {
                 onTabClick = { /* no-op */ },
                 onTagClick = { },
                 onLikeClick = { /* no-op */ },
+                onLikeLongPress = { /* no-op */ },
                 onCoinClick = { /* no-op */ },
                 onFavClick = { /* no-op */ },
                 onSecondaryClick = { onFollowButtonClicked() },

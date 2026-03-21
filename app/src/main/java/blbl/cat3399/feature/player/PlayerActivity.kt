@@ -149,8 +149,10 @@ class PlayerActivity : BaseActivity() {
     internal var coinActionJob: kotlinx.coroutines.Job? = null
     internal var favDialogJob: kotlinx.coroutines.Job? = null
     internal var favApplyJob: kotlinx.coroutines.Job? = null
+    internal var tripleActionJob: Job? = null
     internal var socialStateFetchJob: kotlinx.coroutines.Job? = null
     internal var socialStateFetchToken: Int = 0
+    internal var likeButtonHoldController: HoldToTriggerController? = null
 
     internal var commentSort: Int = COMMENT_SORT_HOT
     internal var commentsFetchJob: kotlinx.coroutines.Job? = null
@@ -1823,6 +1825,7 @@ class PlayerActivity : BaseActivity() {
             toggleSettingsPanel()
         }
 
+        installLikeButtonHoldInteraction()
         binding.btnLike.setOnClickListener { onLikeButtonClicked() }
         binding.btnCoin.setOnClickListener { onCoinButtonClicked() }
         binding.btnFav.setOnClickListener { onFavButtonClicked() }

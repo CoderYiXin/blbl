@@ -13,6 +13,7 @@ import blbl.cat3399.core.image.ImageUrl
 import blbl.cat3399.core.model.VideoCard
 import blbl.cat3399.core.ui.cloneInUserScale
 import blbl.cat3399.databinding.ItemVideoDetailHeaderBinding
+import blbl.cat3399.feature.player.HoldToTriggerController
 import com.google.android.material.chip.Chip
 import java.lang.ref.WeakReference
 
@@ -22,6 +23,7 @@ class VideoDetailHeaderAdapter(
     private val onTabClick: (tabName: String) -> Unit,
     private val onTagClick: (tag: VideoTag) -> Unit,
     private val onLikeClick: () -> Unit,
+    private val onLikeLongPress: () -> Unit,
     private val onCoinClick: () -> Unit,
     private val onFavClick: () -> Unit,
     private val onSecondaryClick: () -> Unit,
@@ -174,6 +176,7 @@ class VideoDetailHeaderAdapter(
             onTabClick = onTabClick,
             onTagClick = onTagClick,
             onLikeClick = onLikeClick,
+            onLikeLongPress = onLikeLongPress,
             onCoinClick = onCoinClick,
             onFavClick = onFavClick,
             onSecondaryClick = onSecondaryClick,
@@ -229,6 +232,7 @@ class VideoDetailHeaderAdapter(
     override fun onViewDetachedFromWindow(holder: Vh) {
         val current = holderRef?.get()
         if (current === holder) holderRef = null
+        holder.cancelTransientUi()
         super.onViewDetachedFromWindow(holder)
     }
 
@@ -239,6 +243,7 @@ class VideoDetailHeaderAdapter(
         private val onTabClick: (tabName: String) -> Unit,
         private val onTagClick: (tag: VideoTag) -> Unit,
         private val onLikeClick: () -> Unit,
+        private val onLikeLongPress: () -> Unit,
         private val onCoinClick: () -> Unit,
         private val onFavClick: () -> Unit,
         private val onSecondaryClick: () -> Unit,
@@ -276,6 +281,13 @@ class VideoDetailHeaderAdapter(
 
         private var lastPartsAutoScrollKey: String? = null
         private var lastSeasonAutoScrollKey: String? = null
+        private val likeHoldController =
+            HoldToTriggerController(
+                view = binding.btnLike,
+                progressHost = binding.btnLike,
+                durationMs = 2_000L,
+                onLongTrigger = onLikeLongPress,
+            )
 
         init {
             binding.btnPlay.setOnClickListener { onPlayClick() }
@@ -295,6 +307,7 @@ class VideoDetailHeaderAdapter(
                 if (hasFocus) onSecondaryActionFocused?.invoke()
             }
 
+            likeHoldController.install()
             binding.btnLike.setOnClickListener { onLikeClick() }
             binding.btnCoin.setOnClickListener { onCoinClick() }
             binding.btnFav.setOnClickListener { onFavClick() }
@@ -406,6 +419,8 @@ class VideoDetailHeaderAdapter(
                 binding.ivLike.imageTintList = if (actionLiked) activeColor else inactiveColor
                 binding.ivCoin.imageTintList = if (actionCoinCount > 0) activeColor else inactiveColor
                 binding.ivFav.imageTintList = if (actionFavored) activeColor else inactiveColor
+            } else {
+                likeHoldController.cancel(resetTriggered = true)
             }
 
             val safePartsHeader = partsHeaderText?.trim()?.takeIf { it.isNotBlank() }
@@ -487,6 +502,10 @@ class VideoDetailHeaderAdapter(
             // Nested horizontal lists can change their measured height after adapter updates;
             // ensure the header item gets re-measured to avoid overlap with following items.
             binding.root.requestLayout()
+        }
+
+        fun cancelTransientUi() {
+            likeHoldController.cancel(resetTriggered = true)
         }
 
         private fun bindTags(tags: List<VideoTag>) {

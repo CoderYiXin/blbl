@@ -334,7 +334,7 @@
             android:src="@drawable/ic_player_up"
             app:tint="@color/player_button_tint" />
 
-            <ImageButton
+            <blbl.cat3399.feature.player.HoldProgressImageButton
                 android:id="@+id/btn_like"
                 android:layout_width="?attr/playerOsdButtonTargetSize"
                 android:layout_height="?attr/playerOsdButtonTargetSize"

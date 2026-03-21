@@ -32,12 +32,15 @@ import blbl.cat3399.core.ui.popup.AppPopup
 import blbl.cat3399.databinding.ActivityVideoDetailBinding
 import blbl.cat3399.feature.following.UpDetailActivity
 import blbl.cat3399.feature.my.BangumiDetailActivity
+import blbl.cat3399.feature.player.ArchiveTripleActionState
 import blbl.cat3399.feature.player.PlayerActivity
 import blbl.cat3399.feature.player.PlayerPlaylistItem
 import blbl.cat3399.feature.player.PlayerPlaylistStore
+import blbl.cat3399.feature.player.executeArchiveTripleAction
 import blbl.cat3399.feature.player.parseMultiPagePlaylistFromViewWithUiCards
 import blbl.cat3399.feature.player.parseUgcSeasonPlaylistFromArchivesListWithUiCards
 import blbl.cat3399.feature.player.parseUgcSeasonPlaylistFromViewWithUiCards
+import blbl.cat3399.feature.player.userMessage
 import blbl.cat3399.feature.tag.TagDetailActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -92,6 +95,7 @@ class VideoDetailActivity : BaseActivity() {
     private var coinActionJob: Job? = null
     private var favDialogJob: Job? = null
     private var favApplyJob: Job? = null
+    private var tripleActionJob: Job? = null
     private var socialStateFetchJob: Job? = null
     private var socialStateFetchToken: Int = 0
 
@@ -208,6 +212,7 @@ class VideoDetailActivity : BaseActivity() {
                 onTabClick = { tab -> openRegionTab(tab) },
                 onTagClick = { tag -> onVideoTagClick(tag) },
                 onLikeClick = { onLikeButtonClicked() },
+                onLikeLongPress = { onLikeButtonLongPressed() },
                 onCoinClick = { onCoinButtonClicked() },
                 onFavClick = { onFavButtonClicked() },
                 onSecondaryClick = { /* video detail has no secondary action yet */ },
@@ -344,6 +349,8 @@ class VideoDetailActivity : BaseActivity() {
         val codeToken = ++requestToken
         loadJob?.cancel()
         loadJob = null
+        tripleActionJob?.cancel()
+        tripleActionJob = null
 
         binding.swipeRefresh.isRefreshing = true
 
@@ -849,19 +856,24 @@ class VideoDetailActivity : BaseActivity() {
 
                     var changed = false
                     liked?.let { value ->
-                        if (likeActionJob?.isActive != true && actionLiked == baselineLiked) {
+                        if (tripleActionJob?.isActive != true && likeActionJob?.isActive != true && actionLiked == baselineLiked) {
                             actionLiked = value
                             changed = true
                         }
                     }
                     coins?.let { value ->
-                        if (coinActionJob?.isActive != true && actionCoinCount == baselineCoinCount) {
+                        if (tripleActionJob?.isActive != true && coinActionJob?.isActive != true && actionCoinCount == baselineCoinCount) {
                             actionCoinCount = value.coerceIn(0, 2)
                             changed = true
                         }
                     }
                     favoured?.let { value ->
-                        if (favDialogJob?.isActive != true && favApplyJob?.isActive != true && actionFavored == baselineFavored) {
+                        if (
+                            tripleActionJob?.isActive != true &&
+                            favDialogJob?.isActive != true &&
+                            favApplyJob?.isActive != true &&
+                            actionFavored == baselineFavored
+                        ) {
                             actionFavored = value
                             changed = true
                         }
@@ -873,7 +885,68 @@ class VideoDetailActivity : BaseActivity() {
             }
     }
 
+    private fun onLikeButtonLongPressed() {
+        if (tripleActionJob?.isActive == true) return
+        if (
+            likeActionJob?.isActive == true ||
+            coinActionJob?.isActive == true ||
+            favDialogJob?.isActive == true ||
+            favApplyJob?.isActive == true
+        ) {
+            AppToast.show(this, "操作进行中，请稍后")
+            return
+        }
+        if (!BiliClient.cookies.hasSessData()) {
+            AppToast.show(this, "请先登录后再一键三连")
+            return
+        }
+
+        val requestBvid = bvid.trim().takeIf { it.isNotBlank() } ?: return
+        val requestAid = aid?.takeIf { it > 0L }
+        val selfMid = BiliClient.cookies.getCookieValue("DedeUserID")?.trim()?.toLongOrNull()?.takeIf { it > 0L }
+        val initialState =
+            ArchiveTripleActionState(
+                liked = actionLiked,
+                coinCount = actionCoinCount,
+                favored = actionFavored,
+            )
+
+        if (initialState.isSatisfied) {
+            AppToast.show(this, "已完成三连")
+            return
+        }
+
+        tripleActionJob =
+            lifecycleScope.launch {
+                try {
+                    val result =
+                        executeArchiveTripleAction(
+                            bvid = requestBvid,
+                            aid = requestAid,
+                            selfMid = selfMid,
+                            initialState = initialState,
+                            isStillValid = {
+                                this@VideoDetailActivity.bvid == requestBvid &&
+                                    (requestAid == null || this@VideoDetailActivity.aid == requestAid)
+                            },
+                        )
+                    actionLiked = result.state.liked
+                    actionCoinCount = result.state.coinCount
+                    actionFavored = result.state.favored
+                    applyHeader()
+                    AppToast.show(this@VideoDetailActivity, result.toastMessage())
+                } catch (t: Throwable) {
+                    if (t is CancellationException) return@launch
+                    AppToast.show(this@VideoDetailActivity, t.userMessage(defaultMessage = "操作失败"))
+                } finally {
+                    tripleActionJob = null
+                    applyHeader()
+                }
+            }
+    }
+
     private fun onLikeButtonClicked() {
+        if (tripleActionJob?.isActive == true) return
         if (likeActionJob?.isActive == true) return
         if (!BiliClient.cookies.hasSessData()) {
             AppToast.show(this, "请先登录后再点赞")
@@ -909,6 +982,7 @@ class VideoDetailActivity : BaseActivity() {
     }
 
     private fun onCoinButtonClicked() {
+        if (tripleActionJob?.isActive == true) return
         if (coinActionJob?.isActive == true) return
         if (actionCoinCount >= 2) return
         if (!BiliClient.cookies.hasSessData()) {
@@ -944,6 +1018,7 @@ class VideoDetailActivity : BaseActivity() {
     }
 
     private fun onFavButtonClicked() {
+        if (tripleActionJob?.isActive == true) return
         if (favDialogJob?.isActive == true || favApplyJob?.isActive == true) return
         val selfMid = BiliClient.cookies.getCookieValue("DedeUserID")?.trim()?.toLongOrNull()?.takeIf { it > 0L }
         if (selfMid == null) {

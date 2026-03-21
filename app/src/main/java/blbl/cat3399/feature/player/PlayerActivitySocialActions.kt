@@ -35,6 +35,7 @@ internal fun PlayerActivity.applyOsdButtonsVisibility() {
     binding.btnFav.visibility = if (enabled.contains(AppPrefs.PLAYER_OSD_BTN_FAV)) View.VISIBLE else View.GONE
     binding.btnListPanel.visibility = if (enabled.contains(AppPrefs.PLAYER_OSD_BTN_LIST_PANEL)) View.VISIBLE else View.GONE
     binding.btnAdvanced.visibility = if (enabled.contains(AppPrefs.PLAYER_OSD_BTN_ADVANCED)) View.VISIBLE else View.GONE
+    if (binding.btnLike.visibility != View.VISIBLE) cancelLikeButtonHoldGesture(resetTriggered = true)
 
     updateActionButtonsUi()
     updatePlaylistControls()
@@ -127,19 +128,24 @@ internal fun PlayerActivity.refreshActionButtonStatesFromServer(
 
                 var changed = false
                 liked?.let { value ->
-                    if (likeActionJob?.isActive != true && actionLiked == baselineLiked) {
+                    if (tripleActionJob?.isActive != true && likeActionJob?.isActive != true && actionLiked == baselineLiked) {
                         actionLiked = value
                         changed = true
                     }
                 }
                 coins?.let { value ->
-                    if (coinActionJob?.isActive != true && actionCoinCount == baselineCoinCount) {
+                    if (tripleActionJob?.isActive != true && coinActionJob?.isActive != true && actionCoinCount == baselineCoinCount) {
                         actionCoinCount = value.coerceIn(0, 2)
                         changed = true
                     }
                 }
                 favoured?.let { value ->
-                    if (favDialogJob?.isActive != true && favApplyJob?.isActive != true && actionFavored == baselineFavored) {
+                    if (
+                        tripleActionJob?.isActive != true &&
+                        favDialogJob?.isActive != true &&
+                        favApplyJob?.isActive != true &&
+                        actionFavored == baselineFavored
+                    ) {
                         actionFavored = value
                         changed = true
                     }
@@ -152,6 +158,7 @@ internal fun PlayerActivity.refreshActionButtonStatesFromServer(
 }
 
 internal fun PlayerActivity.onLikeButtonClicked(showControls: Boolean = true) {
+    if (tripleActionJob?.isActive == true) return
     if (likeActionJob?.isActive == true) return
     val requestBvid = currentBvid.trim().takeIf { it.isNotBlank() } ?: return
     val targetLike = !actionLiked
@@ -184,6 +191,7 @@ internal fun PlayerActivity.onLikeButtonClicked(showControls: Boolean = true) {
 }
 
 internal fun PlayerActivity.onCoinButtonClicked(showControls: Boolean = true) {
+    if (tripleActionJob?.isActive == true) return
     if (coinActionJob?.isActive == true) return
     if (actionCoinCount >= 2) return
     val requestBvid = currentBvid.trim().takeIf { it.isNotBlank() } ?: return
@@ -216,6 +224,7 @@ internal fun PlayerActivity.onCoinButtonClicked(showControls: Boolean = true) {
 }
 
 internal fun PlayerActivity.onFavButtonClicked(showControls: Boolean = true) {
+    if (tripleActionJob?.isActive == true) return
     if (favDialogJob?.isActive == true || favApplyJob?.isActive == true) return
     val selfMid = BiliClient.cookies.getCookieValue("DedeUserID")?.trim()?.toLongOrNull()?.takeIf { it > 0L }
     if (selfMid == null) {
