@@ -31,16 +31,24 @@ internal object PlayerSettingKeys {
     const val PLAYBACK_SPEED = "playback_speed"
     const val AUDIO_BALANCE = "audio_balance"
     const val PLAYBACK_MODE = "playback_mode"
+    const val SUBTITLE_MENU = "subtitle_menu"
     const val SUBTITLE_LANG = "subtitle_lang"
     const val SUBTITLE_TEXT_SIZE = "subtitle_text_size"
     const val SUBTITLE_BOTTOM_PADDING = "subtitle_bottom_padding"
     const val SUBTITLE_BACKGROUND_OPACITY = "subtitle_background_opacity"
+    const val DANMAKU_MENU = "danmaku_menu"
     const val DANMAKU_OPACITY = "danmaku_opacity"
     const val DANMAKU_TEXT_SIZE = "danmaku_text_size"
     const val DANMAKU_SPEED = "danmaku_speed"
     const val DANMAKU_AREA = "danmaku_area"
     const val DEBUG_INFO = "debug_info"
     const val PERSISTENT_BOTTOM_PROGRESS = "persistent_bottom_progress"
+}
+
+internal enum class PlayerSettingsMenu {
+    ROOT,
+    SUBTITLE,
+    DANMAKU,
 }
 
 internal fun PlayerActivity.handleSettingsItemClick(item: PlayerSettingsAdapter.SettingItem) {
@@ -52,10 +60,12 @@ internal fun PlayerActivity.handleSettingsItemClick(item: PlayerSettingsAdapter.
         PlayerSettingKeys.PLAYBACK_SPEED -> showSpeedDialog()
         PlayerSettingKeys.AUDIO_BALANCE -> showAudioBalanceDialog()
         PlayerSettingKeys.PLAYBACK_MODE -> showPlaybackModeDialog()
+        PlayerSettingKeys.SUBTITLE_MENU -> showSubtitleSettingsMenu()
         PlayerSettingKeys.SUBTITLE_LANG -> showSubtitleLangDialog()
         PlayerSettingKeys.SUBTITLE_TEXT_SIZE -> showSubtitleTextSizeDialog()
         PlayerSettingKeys.SUBTITLE_BOTTOM_PADDING -> showSubtitleBottomPaddingDialog()
         PlayerSettingKeys.SUBTITLE_BACKGROUND_OPACITY -> showSubtitleBackgroundOpacityDialog()
+        PlayerSettingKeys.DANMAKU_MENU -> showDanmakuSettingsMenu()
         PlayerSettingKeys.DANMAKU_OPACITY -> showDanmakuOpacityDialog()
         PlayerSettingKeys.DANMAKU_TEXT_SIZE -> showDanmakuTextSizeDialog()
         PlayerSettingKeys.DANMAKU_SPEED -> showDanmakuSpeedDialog()
@@ -77,84 +87,206 @@ internal fun PlayerActivity.handleSettingsItemClick(item: PlayerSettingsAdapter.
     }
 }
 
-internal fun PlayerActivity.refreshSettings(adapter: PlayerSettingsAdapter) {
+internal fun PlayerActivity.showSettingsRoot(focusKey: String? = null) {
+    settingsPanelMenu = PlayerSettingsMenu.ROOT
+    (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.let { refreshSettings(it, focusKey) }
+}
+
+internal fun PlayerActivity.showSubtitleSettingsMenu() {
+    settingsPanelMenu = PlayerSettingsMenu.SUBTITLE
+    (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.let {
+        refreshSettings(it, PlayerSettingKeys.SUBTITLE_LANG)
+    }
+}
+
+internal fun PlayerActivity.showDanmakuSettingsMenu() {
+    settingsPanelMenu = PlayerSettingsMenu.DANMAKU
+    (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.let {
+        refreshSettings(it, PlayerSettingKeys.DANMAKU_OPACITY)
+    }
+}
+
+internal fun PlayerActivity.backFromSettingsSubmenu(): Boolean {
+    return when (settingsPanelMenu) {
+        PlayerSettingsMenu.SUBTITLE -> {
+            showSettingsRoot(PlayerSettingKeys.SUBTITLE_MENU)
+            true
+        }
+
+        PlayerSettingsMenu.DANMAKU -> {
+            showSettingsRoot(PlayerSettingKeys.DANMAKU_MENU)
+            true
+        }
+
+        PlayerSettingsMenu.ROOT -> false
+    }
+}
+
+internal fun PlayerActivity.refreshSettings(
+    adapter: PlayerSettingsAdapter,
+    preferredFocusKey: String? = null,
+) {
     val prefs = BiliClient.prefs
-    val restoreFocusKey = currentSettingsFocusKey()
     val subtitleSupported = player?.capabilities?.subtitlesSupported == true
+    val menu =
+        when (settingsPanelMenu) {
+            PlayerSettingsMenu.SUBTITLE -> {
+                if (subtitleSupported) {
+                    PlayerSettingsMenu.SUBTITLE
+                } else {
+                    settingsPanelMenu = PlayerSettingsMenu.ROOT
+                    PlayerSettingsMenu.ROOT
+                }
+            }
+
+            PlayerSettingsMenu.DANMAKU -> PlayerSettingsMenu.DANMAKU
+            PlayerSettingsMenu.ROOT -> PlayerSettingsMenu.ROOT
+        }
+    val restoreFocusKey = preferredFocusKey ?: currentSettingsFocusKey()
+    val items =
+        when (menu) {
+            PlayerSettingsMenu.ROOT -> buildRootSettingsItems(prefs = prefs, subtitleSupported = subtitleSupported)
+            PlayerSettingsMenu.SUBTITLE -> buildSubtitleSettingsItems()
+            PlayerSettingsMenu.DANMAKU -> buildDanmakuSettingsItems()
+        }
+    adapter.submit(
+        items,
+        onCommitted = {
+            if (restoreFocusKey != null && restoreSettingsPanelFocusByKey(restoreFocusKey)) {
+                return@submit
+            }
+            if (restoreFocusKey != null && isSettingsPanelVisible()) {
+                focusSettingsPanel()
+            }
+        },
+    )
+}
+
+private fun PlayerActivity.buildRootSettingsItems(
+    prefs: AppPrefs,
+    subtitleSupported: Boolean,
+): List<PlayerSettingsAdapter.SettingItem> {
+    return buildList {
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.RESOLUTION,
+                title = "分辨率",
+                subtitle = resolutionSubtitle(),
+            ),
+        )
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.AUDIO_TRACK,
+                title = "音轨",
+                subtitle = audioSubtitle(),
+            ),
+        )
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.CODEC,
+                title = "视频编码",
+                subtitle = session.preferCodec,
+            ),
+        )
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.PLAYBACK_SPEED,
+                title = "播放速度",
+                subtitle = String.format(Locale.US, "%.2fx", session.playbackSpeed),
+            ),
+        )
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.AUDIO_BALANCE,
+                title = "音频平衡",
+                subtitle = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel).label,
+            ),
+        )
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.PLAYBACK_MODE,
+                title = "播放模式",
+                subtitle = playbackModeSubtitle(),
+            ),
+        )
+        if (subtitleSupported) {
+            add(
+                PlayerSettingsAdapter.SettingItem(
+                    key = PlayerSettingKeys.SUBTITLE_MENU,
+                    title = "字幕设置",
+                    subtitle = "语言/字体/间距/背景",
+                ),
+            )
+        }
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.DANMAKU_MENU,
+                title = "弹幕设置",
+                subtitle = "透明度/字体/速度/区域",
+            ),
+        )
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.DEBUG_INFO,
+                title = "调试信息",
+                subtitle = if (session.debugEnabled) "开" else "关",
+            ),
+        )
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.PERSISTENT_BOTTOM_PROGRESS,
+                title = "底部常驻进度条",
+                subtitle = if (prefs.playerPersistentBottomProgressEnabled) "开" else "关",
+            ),
+        )
+        add(
+            PlayerSettingsAdapter.SettingItem(
+                key = PlayerSettingKeys.PLAYER_ENGINE,
+                title = "播放器内核",
+                subtitle = playerEngineSubtitle(),
+            ),
+        )
+    }
+}
+
+private fun PlayerActivity.buildSubtitleSettingsItems(): List<PlayerSettingsAdapter.SettingItem> {
     val items =
         buildList {
             add(
                 PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.RESOLUTION,
-                    title = "分辨率",
-                    subtitle = resolutionSubtitle(),
+                    key = PlayerSettingKeys.SUBTITLE_LANG,
+                    title = "字幕语言",
+                    subtitle = subtitleLangSubtitle(),
                 ),
             )
             add(
                 PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.AUDIO_TRACK,
-                    title = "音轨",
-                    subtitle = audioSubtitle(),
+                    key = PlayerSettingKeys.SUBTITLE_TEXT_SIZE,
+                    title = "字幕字体大小",
+                    subtitle = session.subtitleTextSizeSp.toInt().toString(),
                 ),
             )
             add(
                 PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.CODEC,
-                    title = "视频编码",
-                    subtitle = session.preferCodec,
+                    key = PlayerSettingKeys.SUBTITLE_BOTTOM_PADDING,
+                    title = "字幕底部间距",
+                    subtitle = "${(session.subtitleBottomPaddingFraction * 100f).roundToInt()}%",
                 ),
             )
             add(
                 PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.PLAYBACK_SPEED,
-                    title = "播放速度",
-                    subtitle = String.format(Locale.US, "%.2fx", session.playbackSpeed),
+                    key = PlayerSettingKeys.SUBTITLE_BACKGROUND_OPACITY,
+                    title = "字幕背景透明度",
+                    subtitle = String.format(Locale.US, "%.2f", session.subtitleBackgroundOpacity),
                 ),
             )
-            add(
-                PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.AUDIO_BALANCE,
-                    title = "音频平衡",
-                    subtitle = AudioBalanceLevel.fromPrefValue(prefs.playerAudioBalanceLevel).label,
-                ),
-            )
-            add(
-                PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.PLAYBACK_MODE,
-                    title = "播放模式",
-                    subtitle = playbackModeSubtitle(),
-                ),
-            )
-            if (subtitleSupported) {
-                add(
-                    PlayerSettingsAdapter.SettingItem(
-                        key = PlayerSettingKeys.SUBTITLE_LANG,
-                        title = "字幕语言",
-                        subtitle = subtitleLangSubtitle(),
-                    ),
-                )
-                add(
-                    PlayerSettingsAdapter.SettingItem(
-                        key = PlayerSettingKeys.SUBTITLE_TEXT_SIZE,
-                        title = "字幕字体大小",
-                        subtitle = session.subtitleTextSizeSp.toInt().toString(),
-                    ),
-                )
-                add(
-                    PlayerSettingsAdapter.SettingItem(
-                        key = PlayerSettingKeys.SUBTITLE_BOTTOM_PADDING,
-                        title = "字幕底部间距",
-                        subtitle = "${(session.subtitleBottomPaddingFraction * 100f).roundToInt()}%",
-                    ),
-                )
-                add(
-                    PlayerSettingsAdapter.SettingItem(
-                        key = PlayerSettingKeys.SUBTITLE_BACKGROUND_OPACITY,
-                        title = "字幕背景透明度",
-                        subtitle = String.format(Locale.US, "%.2f", session.subtitleBackgroundOpacity),
-                    ),
-                )
-            }
+        }
+    return items
+}
+
+private fun PlayerActivity.buildDanmakuSettingsItems(): List<PlayerSettingsAdapter.SettingItem> {
+    val items =
+        buildList {
             add(
                 PlayerSettingsAdapter.SettingItem(
                     key = PlayerSettingKeys.DANMAKU_OPACITY,
@@ -183,35 +315,8 @@ internal fun PlayerActivity.refreshSettings(adapter: PlayerSettingsAdapter) {
                     subtitle = areaText(session.danmaku.area),
                 ),
             )
-            add(
-                PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.DEBUG_INFO,
-                    title = "调试信息",
-                    subtitle = if (session.debugEnabled) "开" else "关",
-                ),
-            )
-            add(
-                PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.PERSISTENT_BOTTOM_PROGRESS,
-                    title = "底部常驻进度条",
-                    subtitle = if (prefs.playerPersistentBottomProgressEnabled) "开" else "关",
-                ),
-            )
-            add(
-                PlayerSettingsAdapter.SettingItem(
-                    key = PlayerSettingKeys.PLAYER_ENGINE,
-                    title = "播放器内核",
-                    subtitle = playerEngineSubtitle(),
-                ),
-            )
         }
-    adapter.submit(
-        items,
-        onCommitted = {
-            val key = restoreFocusKey ?: return@submit
-            restoreSettingsPanelFocusByKey(key)
-        },
-    )
+    return items
 }
 
 private fun PlayerActivity.playerEngineSubtitle(): String {
@@ -292,11 +397,14 @@ private fun PlayerActivity.restoreSettingsPanelFocusByKey(key: String): Boolean 
         return v.requestFocus()
     }
 
-    if (requestFocus(rv.findViewHolderForAdapterPosition(targetPos)?.itemView)) return true
+    val direct = rv.findViewHolderForAdapterPosition(targetPos)?.itemView
+    if (requestFocus(direct)) return true
+
     rv.scrollToPosition(targetPos)
-    if (requestFocus(rv.findViewHolderForAdapterPosition(targetPos)?.itemView)) return true
-    if (requestFocus(rv.getChildAt(0))) return true
-    return false
+    rv.post {
+        requestFocus(rv.findViewHolderForAdapterPosition(targetPos)?.itemView)
+    }
+    return true
 }
 
 private inline fun PlayerActivity.showSettingsSingleChoiceDialog(

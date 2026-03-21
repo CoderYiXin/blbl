@@ -228,6 +228,7 @@ class PlayerActivity : BaseActivity() {
     internal var partsListFetchJob: kotlinx.coroutines.Job? = null
     internal var partsListFetchToken: Int = 0
     internal lateinit var session: PlayerSessionSettings
+    internal var settingsPanelMenu: PlayerSettingsMenu = PlayerSettingsMenu.ROOT
     internal var bottomCardPanelKind: PlayerVideoListKind = PlayerVideoListKind.PAGE
     internal var bottomCardPanelPreferContentFocus: Boolean = false
     internal var bottomCardPanelRestoreFocus: WeakReference<View>? = null

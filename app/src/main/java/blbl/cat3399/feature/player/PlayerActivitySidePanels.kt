@@ -242,7 +242,7 @@ internal fun PlayerActivity.showSettingsPanel() {
     // even if it relies on constraints to those bars.
     setControlsVisible(true)
     binding.settingsPanel.visibility = View.VISIBLE
-    focusSettingsPanel()
+    showSettingsRoot(focusKey = PlayerSettingKeys.RESOLUTION)
 }
 
 internal fun PlayerActivity.hideSettingsPanel() {
@@ -298,6 +298,9 @@ internal fun PlayerActivity.onSidePanelBackPressed(): Boolean {
         return true
     }
     if (isSettingsPanelVisible()) {
+        if (backFromSettingsSubmenu()) {
+            return true
+        }
         hideSettingsPanel()
         return true
     }
