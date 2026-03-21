@@ -12,15 +12,12 @@ import android.os.Looper
 import android.os.SystemClock
 import android.util.TypedValue
 import android.view.FocusFinder
-import android.view.GestureDetector
 import android.view.KeyEvent
-import android.view.MotionEvent
 import android.view.Surface
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.TextureView
 import android.view.View
-import android.view.ViewConfiguration
 import android.view.ViewGroup.MarginLayoutParams
 import android.widget.FrameLayout
 import android.widget.SeekBar
@@ -153,6 +150,7 @@ class PlayerActivity : BaseActivity() {
     internal var socialStateFetchJob: kotlinx.coroutines.Job? = null
     internal var socialStateFetchToken: Int = 0
     internal var likeButtonHoldController: HoldToTriggerController? = null
+    internal var touchController: PlayerTouchController? = null
 
     internal var commentSort: Int = COMMENT_SORT_HOT
     internal var commentsFetchJob: kotlinx.coroutines.Job? = null
@@ -187,8 +185,8 @@ class PlayerActivity : BaseActivity() {
     internal var smartSeekStreak: Int = 0
     internal var smartSeekLastAtMs: Long = 0L
     internal var smartSeekTotalMs: Long = 0L
-    private var tapSeekActiveDirection: Int = 0
-    private var tapSeekActiveUntilMs: Long = 0L
+    internal var tapSeekActiveDirection: Int = 0
+    internal var tapSeekActiveUntilMs: Long = 0L
     internal var keySeekHoldDetectJob: kotlinx.coroutines.Job? = null
     internal var keySeekPendingKeyCode: Int = 0
     internal var keySeekPendingDirection: Int = 0
@@ -1549,6 +1547,7 @@ class PlayerActivity : BaseActivity() {
     }
 
     override fun onStop() {
+        touchController?.onStop()
         exitTraceStopAtMs = SystemClock.elapsedRealtime()
         if (exitCleanupRequested || isFinishing) {
             exitTraceStart("onStop")
@@ -1662,6 +1661,7 @@ class PlayerActivity : BaseActivity() {
         holdSeekJob?.cancel()
         seekHintJob?.cancel()
         keyScrubEndJob?.cancel()
+        releaseTouchGestures()
         videoShotFetchJob?.cancel()
         videoShotFetchJob = null
         videoShotImageCache?.clear()
@@ -1779,65 +1779,7 @@ class PlayerActivity : BaseActivity() {
     }
 
     private fun initControls(engine: BlblPlayerEngine) {
-        val detector =
-            GestureDetector(
-                this,
-                object : GestureDetector.SimpleOnGestureListener() {
-                    override fun onDown(e: MotionEvent): Boolean = true
-
-                    override fun onDoubleTap(e: MotionEvent): Boolean {
-                        if (isSidePanelVisible()) return true
-                        val w = binding.playerView.width.toFloat()
-                        if (w <= 0f) return true
-                        val dir = edgeDirection(e.x, w)
-                        if (dir == 0) {
-                            binding.btnPlayPause.performClick()
-                            return true
-                        }
-                        if (osdMode != OsdMode.Hidden) {
-                            setControlsVisible(false)
-                            return true
-                        }
-
-                        showSeekOsd()
-                        smartSeek(direction = dir, showControls = false, hintKind = SeekHintKind.Step)
-                        tapSeekActiveDirection = dir
-                        tapSeekActiveUntilMs = SystemClock.uptimeMillis() + TAP_SEEK_ACTIVE_MS
-                        return true
-                    }
-
-                    override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                        if (isSidePanelVisible()) return onSidePanelBackPressed()
-                        if (osdMode != OsdMode.Hidden) {
-                            setControlsVisible(false)
-                            return true
-                        }
-
-                        val now = SystemClock.uptimeMillis()
-                        val w = binding.playerView.width.toFloat()
-                        if (w > 0f && now <= tapSeekActiveUntilMs) {
-                            val dir = edgeDirection(e.x, w)
-                            if (dir != 0 && dir == tapSeekActiveDirection) {
-                                showSeekOsd()
-                                smartSeek(direction = dir, showControls = false, hintKind = SeekHintKind.Step)
-                                tapSeekActiveUntilMs = now + TAP_SEEK_ACTIVE_MS
-                                return true
-                            }
-                        }
-
-                        setControlsVisible(true)
-                        return true
-                    }
-                },
-            )
-        val touchListener =
-            View.OnTouchListener { v, event ->
-                val handled = detector.onTouchEvent(event)
-                if (event.action == MotionEvent.ACTION_UP && handled) v.performClick()
-                handled
-            }
-        binding.playerView.setOnTouchListener(touchListener)
-        binding.ijkAspect.setOnTouchListener(touchListener)
+        initTouchGestures()
 
         binding.btnAdvanced.setOnClickListener {
             toggleSettingsPanel()
@@ -3329,6 +3271,19 @@ class PlayerActivity : BaseActivity() {
         internal const val HOLD_SCRUB_SHORT_VIDEO_THRESHOLD_MS = 40_000L
         internal const val HOLD_SCRUB_SHORT_SPEED_MS_PER_S = 4_000L
         private const val BACK_DOUBLE_PRESS_WINDOW_MS = 2_500L
+        internal const val TOUCH_LOCK_UI_HIDE_DELAY_MS = 2_500L
+        internal const val TOUCH_GESTURE_EDGE_LONG_PRESS_THRESHOLD = 0.18f
+        internal const val TOUCH_GESTURE_SIDE_VERTICAL_THRESHOLD = 0.32f
+        internal const val TOUCH_GESTURE_DIRECTION_RATIO = 1.2f
+        internal const val TOUCH_GESTURE_SEEK_START_THRESHOLD_MULTIPLIER = 2.5f
+        internal const val TOUCH_GESTURE_SEEK_START_MIN_DP = 20f
+        internal const val TOUCH_GESTURE_VERTICAL_START_THRESHOLD_MULTIPLIER = 3f
+        internal const val TOUCH_GESTURE_VERTICAL_START_MIN_DP = 25f
+        internal const val TOUCH_GESTURE_BLOCK_THRESHOLD_MULTIPLIER = 3f
+        internal const val TOUCH_GESTURE_SEEK_RATIO = 0.18f
+        internal const val TOUCH_GESTURE_SEEK_MIN_FULL_WIDTH_MS = 20_000L
+        internal const val TOUCH_GESTURE_SEEK_MAX_FULL_WIDTH_MS = 4 * 60_000L
+        internal const val TOUCH_GESTURE_MIN_BRIGHTNESS = 0.02f
         internal const val SEEK_HINT_HIDE_DELAY_MS = 900L
         internal const val SEEK_OSD_HIDE_DELAY_MS = 1_500L
         internal const val AUTO_SKIP_START_WINDOW_MS = 1_000L

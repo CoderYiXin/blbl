@@ -32,6 +32,7 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime
 import androidx.media3.ui.AspectRatioFrameLayout
+import blbl.cat3399.R
 import blbl.cat3399.core.api.BiliApi
 import blbl.cat3399.core.api.BiliApiException
 import blbl.cat3399.core.log.AppLog
@@ -113,6 +114,7 @@ class LivePlayerActivity : BaseActivity() {
     private var behindLiveWindowWindowStartAtMs: Long = 0L
     private var behindLiveWindowRecoverCount: Int = 0
     private var behindLiveWindowLastRecoverAtMs: Long = 0L
+    private var bufferingOverlayShowJob: Job? = null
     private var exitRequested: Boolean = false
 
     private val doubleBackToExit by lazy {
@@ -153,6 +155,7 @@ class LivePlayerActivity : BaseActivity() {
         setContentView(binding.root)
         Immersive.apply(this, prefs.fullscreenEnabled)
         PlayerUiMode.applyLive(this, binding)
+        resetBufferingOverlayState()
 
         roomId = intent.getLongExtra(EXTRA_ROOM_ID, 0L)
         roomTitle = intent.getStringExtra(EXTRA_TITLE).orEmpty()
@@ -279,11 +282,21 @@ class LivePlayerActivity : BaseActivity() {
         engine.addListener(
             object : BlblPlayerEngine.Listener {
                 override fun onPlayerError(error: Throwable) {
-                    if (shouldSuppressPlayerError(error)) return
+                    if (shouldSuppressPlayerError(error)) {
+                        resetBufferingOverlayState()
+                        return
+                    }
                     AppLog.e("LivePlayer", "onPlayerError", error)
                     val playbackException = error as? PlaybackException
-                    if (playbackException != null && tryRecoverBehindLiveWindow(playbackException)) return
-                    if (tryAutoFailoverOnError(error)) return
+                    if (playbackException != null && tryRecoverBehindLiveWindow(playbackException)) {
+                        showBufferingOverlay(immediate = true)
+                        return
+                    }
+                    if (tryAutoFailoverOnError(error)) {
+                        showBufferingOverlay(immediate = true)
+                        return
+                    }
+                    resetBufferingOverlayState()
                     if (playbackException != null) {
                         AppToast.show(this@LivePlayerActivity, "播放失败：${playbackException.errorCodeName}")
                         return
@@ -299,6 +312,12 @@ class LivePlayerActivity : BaseActivity() {
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_BUFFERING && debug.lastPlaybackState != Player.STATE_BUFFERING && engine.playWhenReady) {
                         debug.rebufferCount++
+                    }
+                    when (playbackState) {
+                        Player.STATE_BUFFERING -> showBufferingOverlay(immediate = false)
+                        Player.STATE_READY,
+                        Player.STATE_IDLE,
+                        Player.STATE_ENDED -> resetBufferingOverlayState()
                     }
                     debug.lastPlaybackState = playbackState
                 }
@@ -381,6 +400,7 @@ class LivePlayerActivity : BaseActivity() {
         autoFailoverJob?.cancel()
         autoFailoverInFlight = false
         autoHideJob?.cancel()
+        resetBufferingOverlayState()
         binding.playerView.player = null
         player?.setVideoSurface(null)
         ijkTextureSurface?.release()
@@ -1234,6 +1254,7 @@ class LivePlayerActivity : BaseActivity() {
 
     private suspend fun loadAndPlay(initial: Boolean) {
         val engine = player ?: return
+        showBufferingOverlay(immediate = true)
         try {
             val info = BiliApi.liveRoomInfo(roomId)
             realRoomId = info.roomId
@@ -1282,11 +1303,38 @@ class LivePlayerActivity : BaseActivity() {
             if (initial) connectDanmaku()
         } catch (t: Throwable) {
             if (t is CancellationException) throw t
+            resetBufferingOverlayState()
             AppLog.e("LivePlayer", "loadAndPlay failed", t)
             val e = t as? BiliApiException
             val msg = e?.let { "B 站返回：${it.apiCode} / ${it.apiMessage}" } ?: (t.message ?: "未知错误")
             AppToast.showLong(this, msg)
         }
+    }
+
+    private fun resetBufferingOverlayState() {
+        bufferingOverlayShowJob?.cancel()
+        bufferingOverlayShowJob = null
+        if (!::binding.isInitialized) return
+        binding.bufferingOverlay.visibility = View.GONE
+        binding.tvBuffering.text = getString(R.string.player_loading)
+    }
+
+    private fun showBufferingOverlay(immediate: Boolean) {
+        bufferingOverlayShowJob?.cancel()
+        bufferingOverlayShowJob = null
+        if (!::binding.isInitialized) return
+        binding.tvBuffering.text = getString(R.string.player_loading)
+        if (immediate || binding.bufferingOverlay.visibility == View.VISIBLE) {
+            binding.bufferingOverlay.visibility = View.VISIBLE
+            return
+        }
+        bufferingOverlayShowJob =
+            lifecycleScope.launch {
+                delay(BUFFERING_OVERLAY_SHOW_DELAY_MS)
+                bufferingOverlayShowJob = null
+                if (player?.playbackState != Player.STATE_BUFFERING) return@launch
+                binding.bufferingOverlay.visibility = View.VISIBLE
+            }
     }
 
     private fun connectDanmaku() {
@@ -1872,6 +1920,7 @@ class LivePlayerActivity : BaseActivity() {
         private const val LIVE_QN_ORIGINAL = 10_000
         private const val AUTO_HIDE_MS = 4_000L
         private const val BACK_DOUBLE_PRESS_WINDOW_MS = 2_500L
+        private const val BUFFERING_OVERLAY_SHOW_DELAY_MS = 1_000L
         private const val AUTO_FAILOVER_WINDOW_MS = 12_000L
         private const val AUTO_FAILOVER_MIN_INTERVAL_MS = 1_200L
         private const val AUTO_FAILOVER_MAX_SWITCHES = 6

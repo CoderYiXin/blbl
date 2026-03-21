@@ -40,6 +40,7 @@ internal fun PlayerActivity.startProgressLoop() {
 }
 
 internal fun PlayerActivity.toggleControls() {
+    if (isTouchLocked()) return
     val willShow = osdMode == PlayerActivity.OsdMode.Hidden
     if (!willShow) {
         binding.settingsPanel.visibility = View.GONE
@@ -49,7 +50,7 @@ internal fun PlayerActivity.toggleControls() {
 }
 
 internal fun PlayerActivity.setControlsVisible(visible: Boolean) {
-    val show = visible || isSidePanelVisible()
+    val show = (visible || isSidePanelVisible()) && !isTouchLocked()
     seekOsdHideJob?.cancel()
     seekOsdHideJob = null
     seekOsdToken = 0L
@@ -67,6 +68,7 @@ internal fun PlayerActivity.setControlsVisible(visible: Boolean) {
         videoShotFetchJob?.cancel()
     }
     updatePersistentBottomProgressBarVisibility()
+    onTouchOverlayStateChanged()
     if (visible) noteUserInteraction() else autoHideJob?.cancel()
 }
 
@@ -203,6 +205,7 @@ internal fun PlayerActivity.updatePersistentBottomProgressBarVisibility() {
 internal fun PlayerActivity.restartAutoHideTimer() {
     autoHideJob?.cancel()
     val exo = player ?: return
+    if (isTouchLocked()) return
     if (osdMode != PlayerActivity.OsdMode.Full) return
     if (isSidePanelVisible()) return
     if (scrubbing) return

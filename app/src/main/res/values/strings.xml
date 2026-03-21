@@ -97,4 +97,11 @@
     <string name="player_comment_load_failed">加载失败</string>
     <string name="player_comment_no_aid">未获取到 aid，暂不支持评论</string>
     <string name="player_comment_expand">展开</string>
+    <string name="player_touch_lock">锁定触摸</string>
+    <string name="player_touch_unlock">解锁触摸</string>
+    <string name="player_touch_locked">触摸已锁定</string>
+    <string name="player_touch_unlocked">触摸已解锁</string>
+    <string name="player_touch_boost_fmt">倍速播放 x%1$s</string>
+    <string name="player_touch_brightness_fmt">亮度 %1$d%%</string>
+    <string name="player_touch_volume_fmt">音量 %1$d%%</string>
 </resources>
