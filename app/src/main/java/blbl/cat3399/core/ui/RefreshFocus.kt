@@ -13,6 +13,14 @@ internal fun RecyclerView.requestFocusFirstItemOrSelfAfterRefresh(
     smoothScroll: Boolean = false,
     onDone: (focusedFirstItem: Boolean) -> Unit = {},
 ): Boolean {
+    // Don't steal focus from other containers (e.g. MainActivity sidebar).
+    // Only move focus when focus is already within this RecyclerView (or focus is currently null).
+    val focused = rootView?.findFocus()
+    if (focused != null && !FocusTreeUtils.isDescendantOf(focused, this)) {
+        onDone(false)
+        return false
+    }
+
     if (itemCount <= 0) {
         requestFocus()
         onDone(false)
@@ -34,4 +42,3 @@ internal fun parkFocusForDataSetReset(vararg controllers: DpadGridController?) {
 internal fun unparkFocusAfterDataSetReset(vararg controllers: DpadGridController?) {
     for (c in controllers) c?.unparkFocusAfterDataSetReset()
 }
-

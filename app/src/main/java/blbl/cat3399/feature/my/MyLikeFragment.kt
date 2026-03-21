@@ -248,7 +248,13 @@ class MyLikeFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler {
                     adapter.submit(emptyList())
                     pendingFocusFirstItemAfterRefresh = false
                     _binding?.recycler?.postIfAlive(isAlive = { _binding != null && isResumed }) {
-                        binding.recycler.requestFocus()
+                        val recycler = binding.recycler
+                        val isUiAlive = { _binding != null && isResumed }
+                        recycler.requestFocusFirstItemOrSelfAfterRefresh(
+                            itemCount = 0,
+                            smoothScroll = false,
+                            isAlive = isUiAlive,
+                        )
                     }
                 }
                 context?.let {

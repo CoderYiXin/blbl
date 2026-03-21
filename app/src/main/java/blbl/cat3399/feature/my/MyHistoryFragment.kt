@@ -316,7 +316,13 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
                     if (applied.isRefresh && pendingFocusFirstItemAfterRefresh) {
                         pendingFocusFirstItemAfterRefresh = false
                         _binding?.recycler?.postIfAlive(isAlive = { _binding != null && isResumed }) {
-                            binding.recycler.requestFocus()
+                            val recycler = binding.recycler
+                            val isUiAlive = { _binding != null && isResumed }
+                            recycler.requestFocusFirstItemOrSelfAfterRefresh(
+                                itemCount = 0,
+                                smoothScroll = false,
+                                isAlive = isUiAlive,
+                            )
                         }
                     }
                     return@launch
