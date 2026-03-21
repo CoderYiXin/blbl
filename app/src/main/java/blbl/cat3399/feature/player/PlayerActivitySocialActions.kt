@@ -151,11 +151,11 @@ internal fun PlayerActivity.refreshActionButtonStatesFromServer(
         }
 }
 
-internal fun PlayerActivity.onLikeButtonClicked() {
+internal fun PlayerActivity.onLikeButtonClicked(showControls: Boolean = true) {
     if (likeActionJob?.isActive == true) return
     val requestBvid = currentBvid.trim().takeIf { it.isNotBlank() } ?: return
     val targetLike = !actionLiked
-    setControlsVisible(true)
+    if (showControls) setControlsVisible(true)
 
     likeActionJob =
         lifecycleScope.launch {
@@ -183,11 +183,11 @@ internal fun PlayerActivity.onLikeButtonClicked() {
         }
 }
 
-internal fun PlayerActivity.onCoinButtonClicked() {
+internal fun PlayerActivity.onCoinButtonClicked(showControls: Boolean = true) {
     if (coinActionJob?.isActive == true) return
     if (actionCoinCount >= 2) return
     val requestBvid = currentBvid.trim().takeIf { it.isNotBlank() } ?: return
-    setControlsVisible(true)
+    if (showControls) setControlsVisible(true)
 
     coinActionJob =
         lifecycleScope.launch {
@@ -215,7 +215,7 @@ internal fun PlayerActivity.onCoinButtonClicked() {
         }
 }
 
-internal fun PlayerActivity.onFavButtonClicked() {
+internal fun PlayerActivity.onFavButtonClicked(showControls: Boolean = true) {
     if (favDialogJob?.isActive == true || favApplyJob?.isActive == true) return
     val selfMid = BiliClient.cookies.getCookieValue("DedeUserID")?.trim()?.toLongOrNull()?.takeIf { it > 0L }
     if (selfMid == null) {
@@ -230,7 +230,13 @@ internal fun PlayerActivity.onFavButtonClicked() {
 
     val requestBvid = currentBvid
     val requestAid = aid
-    setControlsVisible(true)
+    if (showControls) setControlsVisible(true)
+    val restoreFocusView = currentFocus
+
+    fun restoreFocusAfterPopup() {
+        val target = if (showControls) binding.btnFav else restoreFocusView
+        target?.post { target.requestFocus() }
+    }
 
     favDialogJob =
         lifecycleScope.launch {
@@ -260,11 +266,11 @@ internal fun PlayerActivity.onFavButtonClicked() {
                     title = "选择收藏夹",
                     items = labels,
                     checkedIndex = 0,
-                    onDismiss = { binding.btnFav.post { binding.btnFav.requestFocus() } },
+                    onDismiss = { restoreFocusAfterPopup() },
                 ) { index, _ ->
                     val picked = folders.getOrNull(index)
                     if (picked == null) {
-                        binding.btnFav.post { binding.btnFav.requestFocus() }
+                        restoreFocusAfterPopup()
                         return@singleChoice
                     }
 
@@ -275,7 +281,7 @@ internal fun PlayerActivity.onFavButtonClicked() {
                     if (add.isNotEmpty() || del.isNotEmpty()) {
                         applyFavSelection(rid = requestAid, add = add, del = del, selected = nextSelected.toSet())
                     }
-                    binding.btnFav.post { binding.btnFav.requestFocus() }
+                    restoreFocusAfterPopup()
                 }
             } catch (t: Throwable) {
                 if (t is CancellationException) return@launch

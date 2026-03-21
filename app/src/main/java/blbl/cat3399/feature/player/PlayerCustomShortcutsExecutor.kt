@@ -72,6 +72,52 @@ internal fun PlayerActivity.dispatchPlayerCustomShortcutIfNeeded(event: KeyEvent
 private fun PlayerActivity.applyPlayerCustomShortcut(keyCode: Int, action: PlayerCustomShortcutAction) {
     val memory = shortcutToggleMemory()
     when (action) {
+        PlayerCustomShortcutAction.OpenVideoList -> {
+            if (!showListPanelFromShortcut()) {
+                showSeekHint("视频列表：暂无", hold = false)
+            }
+        }
+
+        PlayerCustomShortcutAction.OpenComments -> {
+            showCommentsPanel()
+        }
+
+        PlayerCustomShortcutAction.OpenSettings -> {
+            showSettingsPanel()
+        }
+
+        PlayerCustomShortcutAction.TogglePlayPause -> {
+            togglePlayPause(showControls = false, showHint = true)
+        }
+
+        PlayerCustomShortcutAction.PlayPrevious -> {
+            playPrevByPlaybackMode(userInitiated = true)
+        }
+
+        PlayerCustomShortcutAction.PlayNext -> {
+            playNextByPlaybackMode(userInitiated = true)
+        }
+
+        PlayerCustomShortcutAction.OpenVideoDetail -> {
+            openCurrentMediaDetail()
+        }
+
+        PlayerCustomShortcutAction.OpenUpDetail -> {
+            openCurrentUpDetail()
+        }
+
+        PlayerCustomShortcutAction.Like -> {
+            onLikeButtonClicked(showControls = false)
+        }
+
+        PlayerCustomShortcutAction.Coin -> {
+            onCoinButtonClicked(showControls = false)
+        }
+
+        PlayerCustomShortcutAction.Fav -> {
+            onFavButtonClicked(showControls = false)
+        }
+
         PlayerCustomShortcutAction.ToggleSubtitles -> {
             val engine = player ?: return showSeekHint("字幕：未就绪", hold = false)
             val exo = (engine as? ExoPlayerEngine)?.exoPlayer

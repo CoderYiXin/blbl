@@ -12,6 +12,28 @@ internal data class PlayerCustomShortcut(
 internal sealed class PlayerCustomShortcutAction(
     val type: String,
 ) {
+    object OpenVideoList : PlayerCustomShortcutAction(TYPE_OPEN_VIDEO_LIST)
+
+    object OpenComments : PlayerCustomShortcutAction(TYPE_OPEN_COMMENTS)
+
+    object OpenSettings : PlayerCustomShortcutAction(TYPE_OPEN_SETTINGS)
+
+    object TogglePlayPause : PlayerCustomShortcutAction(TYPE_TOGGLE_PLAY_PAUSE)
+
+    object PlayPrevious : PlayerCustomShortcutAction(TYPE_PLAY_PREVIOUS)
+
+    object PlayNext : PlayerCustomShortcutAction(TYPE_PLAY_NEXT)
+
+    object OpenVideoDetail : PlayerCustomShortcutAction(TYPE_OPEN_VIDEO_DETAIL)
+
+    object OpenUpDetail : PlayerCustomShortcutAction(TYPE_OPEN_UP_DETAIL)
+
+    object Like : PlayerCustomShortcutAction(TYPE_LIKE)
+
+    object Coin : PlayerCustomShortcutAction(TYPE_COIN)
+
+    object Fav : PlayerCustomShortcutAction(TYPE_FAV)
+
     object ToggleSubtitles : PlayerCustomShortcutAction(TYPE_TOGGLE_SUBTITLES)
 
     object ToggleDanmaku : PlayerCustomShortcutAction(TYPE_TOGGLE_DANMAKU)
@@ -68,6 +90,17 @@ internal sealed class PlayerCustomShortcutAction(
     object TogglePersistentBottomProgress : PlayerCustomShortcutAction(TYPE_TOGGLE_PERSISTENT_BOTTOM_PROGRESS)
 
     companion object {
+        const val TYPE_OPEN_VIDEO_LIST = "open_video_list"
+        const val TYPE_OPEN_COMMENTS = "open_comments"
+        const val TYPE_OPEN_SETTINGS = "open_settings"
+        const val TYPE_TOGGLE_PLAY_PAUSE = "toggle_play_pause"
+        const val TYPE_PLAY_PREVIOUS = "play_previous"
+        const val TYPE_PLAY_NEXT = "play_next"
+        const val TYPE_OPEN_VIDEO_DETAIL = "open_video_detail"
+        const val TYPE_OPEN_UP_DETAIL = "open_up_detail"
+        const val TYPE_LIKE = "like"
+        const val TYPE_COIN = "coin"
+        const val TYPE_FAV = "fav"
         const val TYPE_TOGGLE_SUBTITLES = "toggle_subtitles"
         const val TYPE_TOGGLE_DANMAKU = "toggle_danmaku"
         const val TYPE_SET_PLAYBACK_SPEED = "set_playback_speed"
@@ -189,6 +222,17 @@ internal object PlayerCustomShortcutsStore {
 
     private fun parseAction(type: String, params: JSONObject?): PlayerCustomShortcutAction? {
         return when (type) {
+            PlayerCustomShortcutAction.TYPE_OPEN_VIDEO_LIST -> PlayerCustomShortcutAction.OpenVideoList
+            PlayerCustomShortcutAction.TYPE_OPEN_COMMENTS -> PlayerCustomShortcutAction.OpenComments
+            PlayerCustomShortcutAction.TYPE_OPEN_SETTINGS -> PlayerCustomShortcutAction.OpenSettings
+            PlayerCustomShortcutAction.TYPE_TOGGLE_PLAY_PAUSE -> PlayerCustomShortcutAction.TogglePlayPause
+            PlayerCustomShortcutAction.TYPE_PLAY_PREVIOUS -> PlayerCustomShortcutAction.PlayPrevious
+            PlayerCustomShortcutAction.TYPE_PLAY_NEXT -> PlayerCustomShortcutAction.PlayNext
+            PlayerCustomShortcutAction.TYPE_OPEN_VIDEO_DETAIL -> PlayerCustomShortcutAction.OpenVideoDetail
+            PlayerCustomShortcutAction.TYPE_OPEN_UP_DETAIL -> PlayerCustomShortcutAction.OpenUpDetail
+            PlayerCustomShortcutAction.TYPE_LIKE -> PlayerCustomShortcutAction.Like
+            PlayerCustomShortcutAction.TYPE_COIN -> PlayerCustomShortcutAction.Coin
+            PlayerCustomShortcutAction.TYPE_FAV -> PlayerCustomShortcutAction.Fav
             PlayerCustomShortcutAction.TYPE_TOGGLE_SUBTITLES -> PlayerCustomShortcutAction.ToggleSubtitles
             PlayerCustomShortcutAction.TYPE_TOGGLE_DANMAKU -> PlayerCustomShortcutAction.ToggleDanmaku
             PlayerCustomShortcutAction.TYPE_TOGGLE_DEBUG_OVERLAY -> PlayerCustomShortcutAction.ToggleDebugOverlay
@@ -291,6 +335,17 @@ internal object PlayerCustomShortcutsStore {
 
     private fun buildActionParams(action: PlayerCustomShortcutAction): JSONObject? {
         return when (action) {
+            PlayerCustomShortcutAction.OpenVideoList,
+            PlayerCustomShortcutAction.OpenComments,
+            PlayerCustomShortcutAction.OpenSettings,
+            PlayerCustomShortcutAction.TogglePlayPause,
+            PlayerCustomShortcutAction.PlayPrevious,
+            PlayerCustomShortcutAction.PlayNext,
+            PlayerCustomShortcutAction.OpenVideoDetail,
+            PlayerCustomShortcutAction.OpenUpDetail,
+            PlayerCustomShortcutAction.Like,
+            PlayerCustomShortcutAction.Coin,
+            PlayerCustomShortcutAction.Fav,
             PlayerCustomShortcutAction.ToggleSubtitles,
             PlayerCustomShortcutAction.ToggleDanmaku,
             PlayerCustomShortcutAction.ToggleDebugOverlay,

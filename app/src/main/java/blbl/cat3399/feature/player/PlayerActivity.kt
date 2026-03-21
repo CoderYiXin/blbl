@@ -1683,7 +1683,7 @@ class PlayerActivity : BaseActivity() {
         super.onDestroy()
     }
 
-    private fun openCurrentMediaDetail() {
+    internal fun openCurrentMediaDetail() {
         val epId = currentEpId
         if (epId != null && epId > 0L) {
             requestDecoderReleaseOnStop(reason = "video_detail")
@@ -1724,6 +1724,37 @@ class PlayerActivity : BaseActivity() {
                     pageListIndex.takeIf { it >= 0 }?.let { putExtra(VideoDetailActivity.EXTRA_PLAYLIST_INDEX, it) }
                 },
         )
+    }
+
+    internal fun openCurrentUpDetail() {
+        val mid = currentUpMid
+        if (mid <= 0L) {
+            AppToast.show(this, "未获取到 UP 主信息")
+            return
+        }
+        requestDecoderReleaseOnStop(reason = "up_detail")
+        startActivity(
+            Intent(this, UpDetailActivity::class.java)
+                .putExtra(UpDetailActivity.EXTRA_MID, mid)
+                .apply {
+                    currentUpName?.takeIf { it.isNotBlank() }?.let { putExtra(UpDetailActivity.EXTRA_NAME, it) }
+                    currentUpAvatar?.takeIf { it.isNotBlank() }?.let { putExtra(UpDetailActivity.EXTRA_AVATAR, it) }
+                },
+        )
+    }
+
+    internal fun togglePlayPause(showControls: Boolean = true, showHint: Boolean = false) {
+        val engine = player ?: return
+        val willPlay = !engine.isPlaying
+        if (willPlay) {
+            engine.play()
+        } else {
+            engine.pause()
+        }
+        if (showControls) setControlsVisible(true)
+        if (showHint) {
+            showSeekHint(if (willPlay) "播放" else "暂停", hold = false)
+        }
     }
 
     private fun initControls(engine: BlblPlayerEngine) {
@@ -1796,8 +1827,7 @@ class PlayerActivity : BaseActivity() {
         binding.btnFav.setOnClickListener { onFavButtonClicked() }
 
         binding.btnPlayPause.setOnClickListener {
-            if (engine.isPlaying) engine.pause() else engine.play()
-            setControlsVisible(true)
+            togglePlayPause(showControls = true)
         }
         binding.btnPrev.setOnClickListener {
             playPrevByPlaybackMode(userInitiated = true)
@@ -1840,22 +1870,7 @@ class PlayerActivity : BaseActivity() {
         }
 
         binding.btnUp.setOnClickListener {
-            val mid = currentUpMid
-            if (mid <= 0L) {
-                AppToast.show(this, "未获取到 UP 主信息")
-                return@setOnClickListener
-            }
-            // When jumping into the UP video list and potentially starting another PlayerActivity,
-            // release decoder resources from the current player to avoid `ERROR_CODE_DECODER_INIT_FAILED`.
-            requestDecoderReleaseOnStop(reason = "up_detail")
-            startActivity(
-                Intent(this, UpDetailActivity::class.java)
-                    .putExtra(UpDetailActivity.EXTRA_MID, mid)
-                    .apply {
-                        currentUpName?.takeIf { it.isNotBlank() }?.let { putExtra(UpDetailActivity.EXTRA_NAME, it) }
-                        currentUpAvatar?.takeIf { it.isNotBlank() }?.let { putExtra(UpDetailActivity.EXTRA_AVATAR, it) }
-                    },
-            )
+            openCurrentUpDetail()
             setControlsVisible(true)
         }
 
