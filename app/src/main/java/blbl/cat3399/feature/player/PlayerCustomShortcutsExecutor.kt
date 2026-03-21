@@ -3,8 +3,8 @@ package blbl.cat3399.feature.player
 import android.view.KeyEvent
 import androidx.lifecycle.lifecycleScope
 import blbl.cat3399.core.net.BiliClient
-import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
+import blbl.cat3399.core.prefs.PlayerPlaybackModes
 import blbl.cat3399.core.prefs.PlayerCustomShortcutsStore
 import blbl.cat3399.feature.player.engine.ExoPlayerEngine
 import java.util.Locale
@@ -234,18 +234,7 @@ private fun PlayerActivity.applyPlayerCustomShortcut(keyCode: Int, action: Playe
         is PlayerCustomShortcutAction.SetPlaybackMode -> {
             val engine = player ?: return
             val mode = action.mode.trim()
-            val normalized =
-                when (mode) {
-                    AppPrefs.PLAYER_PLAYBACK_MODE_NONE,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_EXIT,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND,
-                    -> mode
-
-                    else -> AppPrefs.PLAYER_PLAYBACK_MODE_NONE
-                }
+            val normalized = PlayerPlaybackModes.normalize(mode)
             val currentOverride = session.playbackModeOverride
             val nextOverride =
                 if (currentOverride == normalized) {

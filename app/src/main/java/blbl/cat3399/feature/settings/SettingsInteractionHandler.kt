@@ -28,6 +28,7 @@ import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.prefs.PlayerCustomShortcut
 import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
+import blbl.cat3399.core.prefs.PlayerPlaybackModes
 import blbl.cat3399.core.prefs.PlayerCustomShortcutsStore
 import blbl.cat3399.core.theme.LauncherAliasManager
 import blbl.cat3399.core.ui.AppToast
@@ -996,21 +997,15 @@ class SettingsInteractionHandler(
             }
 
             SettingId.PlayerPlaybackMode -> {
-                val options = listOf("播放视频列表", "播放合集/分P视频", "播放推荐视频", "循环该视频", "什么都不做", "退出播放器")
+                val modeCodes = PlayerPlaybackModes.ordered
+                val options = modeCodes.map(PlayerPlaybackModes::label)
                 showChoiceDialog(
                     title = "播放模式（全局默认）",
                     items = options,
-                    current = SettingsText.playbackModeText(prefs.playerPlaybackMode),
+                    current = PlayerPlaybackModes.label(prefs.playerPlaybackMode),
                 ) { selected ->
-                    prefs.playerPlaybackMode =
-                        when (selected) {
-                            "循环该视频" -> blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE
-                            "播放视频列表" -> blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST
-                            "播放合集/分P视频" -> blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST
-                            "播放推荐视频" -> blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND
-                            "退出播放器" -> blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_EXIT
-                            else -> blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_NONE
-                        }
+                    val selectedIndex = options.indexOf(selected).takeIf { it >= 0 } ?: 0
+                    prefs.playerPlaybackMode = modeCodes.getOrElse(selectedIndex) { AppPrefs.PLAYER_PLAYBACK_MODE_NONE }
                     renderer.refreshSection(entry.id)
                 }
             }

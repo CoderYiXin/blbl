@@ -216,6 +216,12 @@ private fun PlayerActivity.syncBottomPanelTabUi(kind: PlayerVideoListKind) {
 private fun PlayerActivity.preferredListPanelKindForPlaybackMode(): PlayerVideoListKind {
     return when (resolvedPlaybackMode()) {
         AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> PlayerVideoListKind.RECOMMEND
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND ->
+            when {
+                partsListItems.isNotEmpty() || partsListFetchJob?.isActive == true -> PlayerVideoListKind.PARTS
+                currentBvid.isNotBlank() -> PlayerVideoListKind.RECOMMEND
+                else -> PlayerVideoListKind.PARTS
+            }
         AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> PlayerVideoListKind.PARTS
         else -> PlayerVideoListKind.PAGE
     }

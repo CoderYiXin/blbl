@@ -808,13 +808,11 @@ internal fun PlayerActivity.handlePlaybackEnded(engine: BlblPlayerEngine) {
 
         AppPrefs.PLAYER_PLAYBACK_MODE_EXIT -> finish()
 
-        AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST -> playNext(userInitiated = false)
-
-        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> playPartsNext(userInitiated = false)
-
-        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> {
-            playRecommendedNext(userInitiated = false)
-        }
+        AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST,
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST,
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND,
+        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND,
+        -> playNextByPlaybackMode(userInitiated = false)
 
         else -> Unit
     }

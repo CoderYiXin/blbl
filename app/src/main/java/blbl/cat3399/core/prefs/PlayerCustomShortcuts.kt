@@ -294,18 +294,8 @@ internal object PlayerCustomShortcutsStore {
 
             PlayerCustomShortcutAction.TYPE_SET_PLAYBACK_MODE -> {
                 val mode = params?.optString("mode", "")?.trim().orEmpty()
-                val normalized =
-                    when (mode) {
-                        AppPrefs.PLAYER_PLAYBACK_MODE_NONE,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_EXIT,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND,
-                        -> mode
-
-                        else -> return null
-                    }
+                val normalized = PlayerPlaybackModes.normalize(mode)
+                if (normalized != mode) return null
                 PlayerCustomShortcutAction.SetPlaybackMode(mode = normalized)
             }
 

@@ -337,18 +337,6 @@ internal fun PlayerActivity.updatePlaylistControls() {
             (pageListItems.isNotEmpty() && pageListIndex in pageListItems.indices) ||
             currentBvid.isNotBlank()
     val playbackMode = resolvedPlaybackMode()
-    val prevKind =
-        when (playbackMode) {
-            AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> PlayerVideoListKind.PARTS
-            else -> PlayerVideoListKind.PAGE
-        }
-    val nextKind =
-        when (playbackMode) {
-            AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> PlayerVideoListKind.RECOMMEND
-            AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> PlayerVideoListKind.PARTS
-            AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST -> PlayerVideoListKind.PAGE
-            else -> PlayerVideoListKind.PAGE
-        }
 
     fun hasControlContext(kind: PlayerVideoListKind): Boolean {
         return when (kind) {
@@ -358,13 +346,30 @@ internal fun PlayerActivity.updatePlaylistControls() {
         }
     }
 
+    val prevEnabled =
+        when (playbackMode) {
+            AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> hasControlContext(PlayerVideoListKind.PARTS)
+            AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND ->
+                hasControlContext(PlayerVideoListKind.PARTS) || hasControlContext(PlayerVideoListKind.PAGE)
+            else -> hasControlContext(PlayerVideoListKind.PAGE)
+        }
+    val nextEnabled =
+        when (playbackMode) {
+            AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> hasControlContext(PlayerVideoListKind.RECOMMEND)
+            AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> hasControlContext(PlayerVideoListKind.PARTS)
+            AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND ->
+                hasControlContext(PlayerVideoListKind.PARTS) || hasControlContext(PlayerVideoListKind.RECOMMEND)
+            AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST -> hasControlContext(PlayerVideoListKind.PAGE)
+            else -> hasControlContext(PlayerVideoListKind.PAGE)
+        }
+
     run {
-        val enabled = hasControlContext(prevKind)
+        val enabled = prevEnabled
         binding.btnPrev.isEnabled = enabled
         binding.btnPrev.alpha = if (enabled) 1.0f else 0.35f
     }
     run {
-        val enabled = hasControlContext(nextKind)
+        val enabled = nextEnabled
         binding.btnNext.isEnabled = enabled
         binding.btnNext.alpha = if (enabled) 1.0f else 0.35f
     }
@@ -477,6 +482,7 @@ internal fun PlayerActivity.playRecommendedNext(userInitiated: Boolean) {
 internal fun PlayerActivity.playNextByPlaybackMode(userInitiated: Boolean) {
     when (resolvedPlaybackMode()) {
         AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> playRecommendedNext(userInitiated = userInitiated)
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND -> playPartsNextThenRecommended(userInitiated = userInitiated)
         AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> playPartsNext(userInitiated = userInitiated)
         AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST -> playNext(userInitiated = userInitiated)
 
@@ -493,6 +499,12 @@ internal fun PlayerActivity.playNextByPlaybackMode(userInitiated: Boolean) {
 internal fun PlayerActivity.playPrevByPlaybackMode(userInitiated: Boolean) {
     when (resolvedPlaybackMode()) {
         AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> playPartsPrev(userInitiated = userInitiated)
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND ->
+            if (partsListItems.isNotEmpty() && partsListIndex in partsListItems.indices) {
+                playPartsPrev(userInitiated = userInitiated)
+            } else {
+                playPrev(userInitiated = userInitiated)
+            }
         else -> playPrev(userInitiated = userInitiated)
     }
 }
@@ -541,6 +553,18 @@ internal fun PlayerActivity.playPartsNext(userInitiated: Boolean) {
         return
     }
     playPartsListIndex(next)
+}
+
+internal fun PlayerActivity.playPartsNextThenRecommended(userInitiated: Boolean) {
+    val list = partsListItems
+    if (list.isNotEmpty() && partsListIndex in list.indices) {
+        val next = partsListIndex + 1
+        if (next in list.indices) {
+            playPartsListIndex(next)
+            return
+        }
+    }
+    playRecommendedNext(userInitiated = userInitiated)
 }
 
 internal fun PlayerActivity.playPartsPrev(userInitiated: Boolean) {

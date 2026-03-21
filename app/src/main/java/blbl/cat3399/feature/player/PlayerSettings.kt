@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.media3.common.Player
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.prefs.AppPrefs
+import blbl.cat3399.core.prefs.PlayerPlaybackModes
 import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.popup.AppPopup
 import blbl.cat3399.feature.player.engine.BlblPlayerEngine
@@ -556,40 +557,23 @@ internal fun PlayerActivity.isPgcLikePlayback(): Boolean {
     return false
 }
 
-internal fun PlayerActivity.resolvedPlaybackMode(): String {
-    val prefs = BiliClient.prefs
-    val override = session.playbackModeOverride
+private fun PlayerActivity.defaultPlaybackModeCode(): String {
     val raw =
-        override
-            ?: if (isPgcLikePlayback()) {
-                // PGC (番剧/影视) 默认始终按“播放视频列表”处理，不受全局默认播放模式影响。
-                AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST
-            } else {
-                prefs.playerPlaybackMode
-            }
-
-    return when (raw) {
-        AppPrefs.PLAYER_PLAYBACK_MODE_NONE,
-        AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE,
-        AppPrefs.PLAYER_PLAYBACK_MODE_EXIT,
-        AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST,
-        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST,
-        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND,
-        -> raw
-
-        else -> AppPrefs.PLAYER_PLAYBACK_MODE_NONE
-    }
+        if (isPgcLikePlayback()) {
+            // PGC (番剧/影视) 默认按“播放合集/分P”处理，不受全局默认播放模式影响。
+            AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST
+        } else {
+            BiliClient.prefs.playerPlaybackMode
+        }
+    return PlayerPlaybackModes.normalize(raw)
 }
 
-internal fun PlayerActivity.playbackModeLabel(code: String): String =
-    when (code) {
-        AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE -> "循环该视频"
-        AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST -> "播放视频列表"
-        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> "播放合集/分P视频"
-        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> "播放推荐视频"
-        AppPrefs.PLAYER_PLAYBACK_MODE_EXIT -> "退出播放器"
-        else -> "什么都不做"
-    }
+internal fun PlayerActivity.resolvedPlaybackMode(): String {
+    val override = session.playbackModeOverride
+    return PlayerPlaybackModes.normalize(override ?: defaultPlaybackModeCode())
+}
+
+internal fun PlayerActivity.playbackModeLabel(code: String): String = PlayerPlaybackModes.label(code)
 
 internal fun PlayerActivity.playbackModeSubtitle(): String {
     return playbackModeLabel(resolvedPlaybackMode())
@@ -605,53 +589,16 @@ internal fun PlayerActivity.applyPlaybackMode(engine: BlblPlayerEngine) {
 
 internal fun PlayerActivity.showPlaybackModeDialog() {
     val engine = player ?: return
-    val items =
-        listOf(
-            "播放视频列表",
-            "播放合集/分P视频",
-            "播放推荐视频",
-            "循环该视频",
-            "什么都不做",
-            "退出播放器",
-        )
-    val currentLabel = playbackModeLabel(resolvedPlaybackMode())
-    val checked = items.indexOf(currentLabel).coerceAtLeast(0)
+    val modeCodes = PlayerPlaybackModes.ordered
+    val items = modeCodes.map(PlayerPlaybackModes::label)
+    val checked = modeCodes.indexOf(resolvedPlaybackMode()).takeIf { it >= 0 } ?: 0
     showSettingsSingleChoiceDialog(
         title = "播放模式",
         items = items,
         checkedIndex = checked,
     ) { which, _ ->
-        val chosen = items.getOrNull(which).orEmpty()
-        val pickedCode =
-            when {
-                chosen.startsWith("循环") -> AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE
-                chosen.startsWith("播放视频列表") -> AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST
-                chosen.startsWith("播放合集/分P") -> AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST
-                chosen.startsWith("播放推荐") -> AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND
-                chosen.startsWith("退出") -> AppPrefs.PLAYER_PLAYBACK_MODE_EXIT
-                else -> AppPrefs.PLAYER_PLAYBACK_MODE_NONE
-            }
-        val defaultCode =
-            run {
-                val prefs = BiliClient.prefs
-                val rawDefault =
-                    if (isPgcLikePlayback()) {
-                        AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST
-                    } else {
-                        prefs.playerPlaybackMode
-                    }
-                when (rawDefault) {
-                    AppPrefs.PLAYER_PLAYBACK_MODE_NONE,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_EXIT,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST,
-                    AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND,
-                    -> rawDefault
-
-                    else -> AppPrefs.PLAYER_PLAYBACK_MODE_NONE
-                }
-            }
+        val pickedCode = modeCodes.getOrElse(which) { AppPrefs.PLAYER_PLAYBACK_MODE_NONE }
+        val defaultCode = defaultPlaybackModeCode()
         session =
             if (pickedCode == defaultCode) {
                 session.copy(playbackModeOverride = null)

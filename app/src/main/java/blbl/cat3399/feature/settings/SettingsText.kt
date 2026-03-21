@@ -3,6 +3,7 @@ package blbl.cat3399.feature.settings
 import android.app.ActivityManager
 import android.content.Context
 import android.content.res.Resources
+import blbl.cat3399.core.prefs.PlayerPlaybackModes
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -222,15 +223,7 @@ object SettingsText {
         return String.format(Locale.US, "%.2fGB", gb)
     }
 
-    fun playbackModeText(code: String): String =
-        when (code) {
-            blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE -> "循环该视频"
-            blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST -> "播放视频列表"
-            blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> "播放合集/分P视频"
-            blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> "播放推荐视频"
-            blbl.cat3399.core.prefs.AppPrefs.PLAYER_PLAYBACK_MODE_EXIT -> "退出播放器"
-            else -> "什么都不做"
-        }
+    fun playbackModeText(code: String): String = PlayerPlaybackModes.label(code)
 
     fun qnText(qn: Int): String =
         when (qn) {

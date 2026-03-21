@@ -1,8 +1,8 @@
 package blbl.cat3399.feature.player
 
-import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
 import blbl.cat3399.core.prefs.PlayerCustomShortcutOpenVideoListTarget
+import blbl.cat3399.core.prefs.PlayerPlaybackModes
 import blbl.cat3399.feature.settings.SettingsText
 import java.util.Locale
 import kotlin.math.abs
@@ -186,15 +186,7 @@ internal object PlayerCustomShortcutCatalog {
             }
 
             PlayerCustomShortcutAction.TYPE_SET_PLAYBACK_MODE -> {
-                val options =
-                    listOf(
-                        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_LOOP_ONE,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_NONE,
-                        AppPrefs.PLAYER_PLAYBACK_MODE_EXIT,
-                    )
+                val options = PlayerPlaybackModes.ordered
                 val current = (currentAction as? PlayerCustomShortcutAction.SetPlaybackMode)?.mode
                 val checked = options.indexOfFirst { it == current }.takeIf { it >= 0 } ?: 0
                 PlayerCustomShortcutValuePickerConfig(

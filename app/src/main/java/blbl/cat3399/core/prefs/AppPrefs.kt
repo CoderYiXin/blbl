@@ -575,8 +575,8 @@ class AppPrefs(context: Context) {
         }
 
     var playerPlaybackMode: String
-        get() = prefs.getString(KEY_PLAYER_PLAYBACK_MODE, PLAYER_PLAYBACK_MODE_NONE) ?: PLAYER_PLAYBACK_MODE_NONE
-        set(value) = prefs.edit().putString(KEY_PLAYER_PLAYBACK_MODE, value).apply()
+        get() = PlayerPlaybackModes.normalize(prefs.getString(KEY_PLAYER_PLAYBACK_MODE, PLAYER_PLAYBACK_MODE_NONE))
+        set(value) = prefs.edit().putString(KEY_PLAYER_PLAYBACK_MODE, PlayerPlaybackModes.normalize(value)).apply()
 
     var playerOsdButtons: List<String>
         get() {
@@ -848,6 +848,7 @@ class AppPrefs(context: Context) {
         const val PLAYER_PLAYBACK_MODE_EXIT = "exit"
         const val PLAYER_PLAYBACK_MODE_PAGE_LIST = "page_list"
         const val PLAYER_PLAYBACK_MODE_PARTS_LIST = "parts_list"
+        const val PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND = "parts_list_then_recommend"
         const val PLAYER_PLAYBACK_MODE_RECOMMEND = "recommend"
 
         const val PLAYER_HOLD_SEEK_MODE_SPEED = "speed"
