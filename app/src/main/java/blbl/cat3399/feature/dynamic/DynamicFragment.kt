@@ -62,6 +62,7 @@ class DynamicFragment : Fragment(), RefreshKeyHandler, BackPressHandler {
     private var followIsLoadingMore: Boolean = false
     private var followEndReached: Boolean = false
     private var followRequestToken: Int = 0
+    private var currentFollowingListOrder: String = BiliClient.prefs.followingListOrder
     private val loadedFollowMids = HashSet<Long>()
     private var followingListController: DpadGridController? = null
 
@@ -289,6 +290,7 @@ class DynamicFragment : Fragment(), RefreshKeyHandler, BackPressHandler {
         if (userMid <= 0) return
 
         loadedFollowMids.clear()
+        currentFollowingListOrder = BiliClient.prefs.followingListOrder
         followPage = 1
         followEndReached = false
         followIsLoadingMore = false
@@ -300,7 +302,7 @@ class DynamicFragment : Fragment(), RefreshKeyHandler, BackPressHandler {
 
         followIsLoadingMore = true
         try {
-            val res = BiliApi.followingsPage(vmid = userMid, pn = followPage, ps = 50)
+            val res = BiliApi.followingsPage(vmid = userMid, pn = followPage, ps = 50, order = currentFollowingListOrder)
             if (token != followRequestToken) return
 
             val filtered = res.items.filter { loadedFollowMids.add(it.mid) }
@@ -337,7 +339,7 @@ class DynamicFragment : Fragment(), RefreshKeyHandler, BackPressHandler {
         followIsLoadingMore = true
         viewLifecycleOwner.lifecycleScope.launch {
             try {
-                val res = BiliApi.followingsPage(vmid = userMid, pn = targetPage, ps = 50)
+                val res = BiliApi.followingsPage(vmid = userMid, pn = targetPage, ps = 50, order = currentFollowingListOrder)
                 if (token != followRequestToken) return@launch
 
                 val filtered = res.items.filter { loadedFollowMids.add(it.mid) }

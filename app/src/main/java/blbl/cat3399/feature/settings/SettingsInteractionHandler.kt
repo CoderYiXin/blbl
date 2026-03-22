@@ -403,6 +403,7 @@ class SettingsInteractionHandler(
                     .put("ui_scale_factor", prefs.uiScaleFactor)
                     .put("sidebar_size", prefs.sidebarSize)
                     .put("startup_page", prefs.startupPage)
+                    .put("following_list_order", prefs.followingListOrder)
                     .put("image_quality", prefs.imageQuality)
                     .put("fullscreen_enabled", prefs.fullscreenEnabled)
                     .put("tab_switch_follows_focus", prefs.tabSwitchFollowsFocus)
@@ -597,6 +598,24 @@ class SettingsInteractionHandler(
                             ?: blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_HOME
                     prefs.startupPage = key
                     AppToast.show(activity, "启动默认页：$selected（下次启动生效）")
+                    renderer.refreshSection(entry.id)
+                }
+            }
+
+            SettingId.FollowingListOrder -> {
+                val options =
+                    listOf(
+                        AppPrefs.FOLLOWING_LIST_ORDER_FOLLOW_TIME to "关注时间",
+                        AppPrefs.FOLLOWING_LIST_ORDER_RECENT_VISIT to "最近访问",
+                    )
+                showChoiceDialog(
+                    title = "关注列表排序",
+                    items = options.map { it.second },
+                    current = SettingsText.followingListOrderText(prefs.followingListOrder),
+                ) { selected ->
+                    val value = options.firstOrNull { it.second == selected }?.first ?: AppPrefs.FOLLOWING_LIST_ORDER_FOLLOW_TIME
+                    prefs.followingListOrder = value
+                    AppToast.show(activity, "关注列表排序：$selected")
                     renderer.refreshSection(entry.id)
                 }
             }

@@ -72,6 +72,23 @@ class AppPrefs(context: Context) {
             prefs.edit().putString(KEY_STARTUP_PAGE, v).apply()
         }
 
+    var followingListOrder: String
+        get() {
+            val raw = prefs.getString(KEY_FOLLOWING_LIST_ORDER, FOLLOWING_LIST_ORDER_FOLLOW_TIME) ?: FOLLOWING_LIST_ORDER_FOLLOW_TIME
+            return when (raw.trim()) {
+                FOLLOWING_LIST_ORDER_RECENT_VISIT -> FOLLOWING_LIST_ORDER_RECENT_VISIT
+                else -> FOLLOWING_LIST_ORDER_FOLLOW_TIME
+            }
+        }
+        set(value) {
+            val normalized =
+                when (value.trim()) {
+                    FOLLOWING_LIST_ORDER_RECENT_VISIT -> FOLLOWING_LIST_ORDER_RECENT_VISIT
+                    else -> FOLLOWING_LIST_ORDER_FOLLOW_TIME
+                }
+            prefs.edit().putString(KEY_FOLLOWING_LIST_ORDER, normalized).apply()
+        }
+
     var userAgent: String
         get() = prefs.getString(KEY_UA, DEFAULT_UA) ?: DEFAULT_UA
         set(value) = prefs.edit().putString(KEY_UA, value).apply()
@@ -741,6 +758,9 @@ class AppPrefs(context: Context) {
         const val THEME_PRESET_DEFAULT = "default"
         const val THEME_PRESET_TV_PINK = "tv_pink"
 
+        const val FOLLOWING_LIST_ORDER_FOLLOW_TIME = "follow_time"
+        const val FOLLOWING_LIST_ORDER_RECENT_VISIT = "recent_visit"
+
         // Main page back focus schemes for "Settings -> Page Settings".
         const val MAIN_BACK_FOCUS_SCHEME_A = "A"
         const val MAIN_BACK_FOCUS_SCHEME_B = "B"
@@ -761,6 +781,7 @@ class AppPrefs(context: Context) {
         private const val KEY_UI_SCALE_FACTOR = "ui_scale_factor"
         private const val KEY_THEME_PRESET = "theme_preset"
         private const val KEY_STARTUP_PAGE = "startup_page"
+        private const val KEY_FOLLOWING_LIST_ORDER = "following_list_order"
         private const val KEY_IMAGE_QUALITY = "image_quality"
         private const val KEY_DANMAKU_ENABLED = "danmaku_enabled"
         private const val KEY_DANMAKU_ALLOW_TOP = "danmaku_allow_top"

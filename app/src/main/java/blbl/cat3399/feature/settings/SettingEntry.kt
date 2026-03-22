@@ -91,6 +91,10 @@ enum class SettingId(
     DeviceDecoder("device_decoder"),
     DeviceScreen("device_screen"),
     DeviceRam("device_ram"),
+
+    // 临时设置
+    FollowingListOrder("following_list_order"),
+    TemporaryPlaceholder("temporary_placeholder"),
 }
 
 data class SettingEntry(

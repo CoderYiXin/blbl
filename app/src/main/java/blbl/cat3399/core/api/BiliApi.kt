@@ -13,6 +13,7 @@ import blbl.cat3399.core.model.LiveAreaParent
 import blbl.cat3399.core.model.LiveRoomCard
 import blbl.cat3399.core.model.VideoCard
 import blbl.cat3399.core.model.VideoTag
+import blbl.cat3399.core.prefs.AppPrefs
 import android.util.Base64
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.net.WebCookieMaintainer
@@ -1515,19 +1516,38 @@ object BiliApi {
         return (value * multiplier).roundToLong()
     }
 
-    suspend fun followings(vmid: Long, pn: Int = 1, ps: Int = 20): List<Following> {
-        return followingsPage(vmid = vmid, pn = pn, ps = ps).items
+    suspend fun followings(
+        vmid: Long,
+        pn: Int = 1,
+        ps: Int = 20,
+        order: String = AppPrefs.FOLLOWING_LIST_ORDER_FOLLOW_TIME,
+    ): List<Following> {
+        return followingsPage(vmid = vmid, pn = pn, ps = ps, order = order).items
     }
 
-    suspend fun followingsPage(vmid: Long, pn: Int = 1, ps: Int = 50): HasMorePage<Following> {
-        val url = BiliClient.withQuery(
-            "https://api.bilibili.com/x/relation/followings",
-            mapOf(
+    suspend fun followingsPage(
+        vmid: Long,
+        pn: Int = 1,
+        ps: Int = 50,
+        order: String = AppPrefs.FOLLOWING_LIST_ORDER_FOLLOW_TIME,
+    ): HasMorePage<Following> {
+        val normalizedOrder =
+            when (order.trim()) {
+                AppPrefs.FOLLOWING_LIST_ORDER_RECENT_VISIT -> AppPrefs.FOLLOWING_LIST_ORDER_RECENT_VISIT
+                else -> AppPrefs.FOLLOWING_LIST_ORDER_FOLLOW_TIME
+            }
+        val query =
+            linkedMapOf(
                 "vmid" to vmid.toString(),
                 "pn" to pn.coerceAtLeast(1).toString(),
                 "ps" to ps.coerceIn(1, 50).toString(),
-                // Add `order_type=attention` to sort by recent visits instead of follow time (default).
-            ),
+            )
+        if (normalizedOrder == AppPrefs.FOLLOWING_LIST_ORDER_RECENT_VISIT) {
+            query["order_type"] = "attention"
+        }
+        val url = BiliClient.withQuery(
+            "https://api.bilibili.com/x/relation/followings",
+            query,
         )
         val json = BiliClient.getJson(
             url,
@@ -1559,7 +1579,7 @@ object BiliApi {
                     ),
                 )
             }
-            AppLog.d(TAG, "followings vmid=$vmid page=$page size=${out.size} total=$total")
+            AppLog.d(TAG, "followings vmid=$vmid page=$page size=${out.size} total=$total order=$normalizedOrder")
             HasMorePage(
                 items = out,
                 page = page,

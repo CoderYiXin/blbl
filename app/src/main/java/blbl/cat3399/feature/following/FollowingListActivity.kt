@@ -35,6 +35,7 @@ class FollowingListActivity : BaseActivity() {
     private var total: Int = 0
     private val loadedMids = HashSet<Long>()
     private val paging = PagedGridStateMachine(initialKey = 1)
+    private var currentFollowingListOrder: String = BiliClient.prefs.followingListOrder
 
     private var dpadGridController: DpadGridController? = null
 
@@ -193,6 +194,7 @@ class FollowingListActivity : BaseActivity() {
     }
 
     private fun resetAndLoad() {
+        currentFollowingListOrder = BiliClient.prefs.followingListOrder
         paging.reset()
         loadedMids.clear()
         total = 0
@@ -223,7 +225,7 @@ class FollowingListActivity : BaseActivity() {
                             if (mid == null) {
                                 null
                             } else {
-                                val res = BiliApi.followingsPage(vmid = mid, pn = page, ps = 50)
+                                val res = BiliApi.followingsPage(vmid = mid, pn = page, ps = 50, order = currentFollowingListOrder)
                                 FetchedPage(items = res.items, total = res.total, hasMore = res.hasMore).also { latestFetched = it }
                             }
                         },

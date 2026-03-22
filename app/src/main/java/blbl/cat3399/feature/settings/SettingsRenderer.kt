@@ -310,6 +310,22 @@ class SettingsRenderer(
                     SettingEntry(SettingId.PlayerDebugEnabled, "显示视频调试信息", if (prefs.playerDebugEnabled) "开" else "关", null),
                 )
 
+            "临时设置" ->
+                listOf(
+                    SettingEntry(
+                        SettingId.TemporaryPlaceholder,
+                        "存放暂时未想好如何设计的设置项，未来完善后移除",
+                        "",
+                        null,
+                    ),
+                    SettingEntry(
+                        SettingId.FollowingListOrder,
+                        "关注列表排序",
+                        SettingsText.followingListOrderText(prefs.followingListOrder),
+                        null,
+                    ),
+                )
+
             "弹幕设置" ->
                 listOf(
                     SettingEntry(SettingId.DanmakuEnabled, "弹幕开关", if (prefs.danmakuEnabled) "开" else "关", null),

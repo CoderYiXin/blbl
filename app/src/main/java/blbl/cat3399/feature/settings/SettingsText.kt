@@ -77,6 +77,12 @@ object SettingsText {
 
     fun gridSpanText(span: Int): String = if (span <= 0) "自动" else span.toString()
 
+    fun followingListOrderText(prefValue: String): String =
+        when (prefValue) {
+            blbl.cat3399.core.prefs.AppPrefs.FOLLOWING_LIST_ORDER_RECENT_VISIT -> "最近访问"
+            else -> "关注时间"
+        }
+
     fun startupPageText(prefValue: String): String =
         when (prefValue) {
             blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_CATEGORY -> "分类"
