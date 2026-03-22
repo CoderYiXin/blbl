@@ -20,8 +20,16 @@ class SettingsLeftAdapter(
     fun submit(list: List<String>, selected: Int) {
         items.clear()
         items.addAll(list)
-        this.selected = selected
+        this.selected = selected.coerceIn(0, (items.lastIndex).coerceAtLeast(0))
         notifyDataSetChanged()
+    }
+
+    fun setSelected(position: Int) {
+        if (position !in items.indices || position == selected) return
+        val oldSelected = selected
+        selected = position
+        if (oldSelected in items.indices) notifyItemChanged(oldSelected)
+        notifyItemChanged(position)
     }
 
     override fun getItemId(position: Int): Long {
@@ -38,12 +46,7 @@ class SettingsLeftAdapter(
             val clickedPosition = holder.bindingAdapterPosition
             if (clickedPosition == RecyclerView.NO_POSITION) return@bind
 
-            val oldSelected = selected
-            if (clickedPosition != oldSelected) {
-                selected = clickedPosition
-                if (oldSelected in items.indices) notifyItemChanged(oldSelected)
-                if (clickedPosition in items.indices) notifyItemChanged(clickedPosition)
-            }
+            setSelected(clickedPosition)
             onClick(clickedPosition)
         }
     }
