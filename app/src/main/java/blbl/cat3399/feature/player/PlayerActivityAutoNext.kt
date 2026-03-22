@@ -1,9 +1,14 @@
 package blbl.cat3399.feature.player
 
+import android.os.SystemClock
 import android.view.View
+import androidx.lifecycle.lifecycleScope
 import androidx.media3.common.Player
 import blbl.cat3399.core.prefs.AppPrefs
+import blbl.cat3399.core.ui.popup.PopupHost
 import blbl.cat3399.feature.player.engine.BlblPlayerEngine
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 internal sealed interface AutoNextTarget {
     val rawTitle: String?
@@ -33,6 +38,36 @@ internal sealed interface AutoNextTarget {
     }
 }
 
+private fun autoNextModeAllowsNext(mode: String): Boolean {
+    return when (mode) {
+        AppPrefs.PLAYER_PLAYBACK_MODE_PAGE_LIST,
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST,
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND,
+        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND,
+        -> true
+
+        else -> false
+    }
+}
+
+private fun autoNextFallbackTitleForMode(mode: String): String {
+    return when (mode) {
+        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> "推荐视频"
+        else -> "下一个视频"
+    }
+}
+
+internal fun PlayerActivity.isAutoNextUiBlocked(): Boolean {
+    if (osdMode != PlayerActivity.OsdMode.Hidden) return true
+    if (transientSeekOsdVisible) return true
+    if (isSidePanelVisible()) return true
+    if (isBottomCardPanelVisible() || binding.recommendScrim.visibility == View.VISIBLE) return true
+    if (isCommentImageViewerVisible()) return true
+    val popupHost = PopupHost.peek(this)
+    if (popupHost?.hasModalView() == true) return true
+    return false
+}
+
 internal fun formatAutoNextHintTitle(rawTitle: String?, fallbackTitle: String): String {
     val normalized =
         rawTitle
@@ -46,7 +81,7 @@ internal fun formatAutoNextHintTitle(rawTitle: String?, fallbackTitle: String): 
     return normalized.substring(0, endExclusive) + "..."
 }
 
-internal fun PlayerActivity.clearAutoNextState(reason: String, resetUserCancellation: Boolean) {
+internal fun PlayerActivity.clearAutoNextPreviewState(reason: String, resetUserCancellation: Boolean) {
     val hadPending = autoNextPending != null
     val hadHint = autoNextHintVisible
     val wasCancelled = autoNextCancelledByUser
@@ -55,8 +90,29 @@ internal fun PlayerActivity.clearAutoNextState(reason: String, resetUserCancella
     if (resetUserCancellation) autoNextCancelledByUser = false
     if (hadPending || hadHint || wasCancelled) {
         trace?.log(
-            "autonext:clear",
+            "autonext:clear_preview",
             "reason=$reason pending=${if (hadPending) 1 else 0} hint=${if (hadHint) 1 else 0} cancelled=${if (wasCancelled) 1 else 0} reset=${if (resetUserCancellation) 1 else 0}",
+        )
+    }
+}
+
+internal fun PlayerActivity.clearAutoNextState(reason: String, resetUserCancellation: Boolean) {
+    val hadPending = autoNextPending != null
+    val hadHint = autoNextHintVisible
+    val wasCancelled = autoNextCancelledByUser
+    val wasArmed = autoNextAfterEndedArmed
+    val hadJob = autoNextAfterEndedJob != null
+    autoNextPending = null
+    dismissAutoNextHint()
+    if (resetUserCancellation) autoNextCancelledByUser = false
+    autoNextAfterEndedArmed = false
+    autoNextAfterEndedToken = 0L
+    autoNextAfterEndedJob?.cancel()
+    autoNextAfterEndedJob = null
+    if (hadPending || hadHint || wasCancelled || wasArmed || hadJob) {
+        trace?.log(
+            "autonext:clear",
+            "reason=$reason pending=${if (hadPending) 1 else 0} hint=${if (hadHint) 1 else 0} cancelled=${if (wasCancelled) 1 else 0} armed=${if (wasArmed) 1 else 0} job=${if (hadJob) 1 else 0} reset=${if (resetUserCancellation) 1 else 0}",
         )
     }
 }
@@ -64,13 +120,19 @@ internal fun PlayerActivity.clearAutoNextState(reason: String, resetUserCancella
 internal fun PlayerActivity.cancelPendingAutoNext(reason: String, markCancelledByUser: Boolean) {
     val hadPending = autoNextPending != null
     val hadHint = autoNextHintVisible
+    val wasArmed = autoNextAfterEndedArmed
+    val hadJob = autoNextAfterEndedJob != null
     autoNextPending = null
     dismissAutoNextHint()
     if (markCancelledByUser) autoNextCancelledByUser = true
-    if (hadPending || hadHint || markCancelledByUser) {
+    autoNextAfterEndedArmed = false
+    autoNextAfterEndedToken = 0L
+    autoNextAfterEndedJob?.cancel()
+    autoNextAfterEndedJob = null
+    if (hadPending || hadHint || wasArmed || hadJob || markCancelledByUser) {
         trace?.log(
             "autonext:cancel",
-            "reason=$reason pending=${if (hadPending) 1 else 0} hint=${if (hadHint) 1 else 0} user=${if (markCancelledByUser) 1 else 0}",
+            "reason=$reason pending=${if (hadPending) 1 else 0} hint=${if (hadHint) 1 else 0} armed=${if (wasArmed) 1 else 0} job=${if (hadJob) 1 else 0} user=${if (markCancelledByUser) 1 else 0}",
         )
     }
 }
@@ -82,6 +144,15 @@ internal fun PlayerActivity.showAutoNextHint(target: AutoNextTarget) {
     val msg = "即将播放 $title"
     autoNextHintText = msg
     // Reuse the existing bottom "seek hint" component for consistent look & feel.
+    showSeekHint(msg, hold = true)
+}
+
+internal fun PlayerActivity.showAutoNextHintFallback(fallbackTitle: String) {
+    autoNextPending = null
+    autoNextHintVisible = true
+    val title = formatAutoNextHintTitle(rawTitle = null, fallbackTitle = fallbackTitle)
+    val msg = "即将播放 $title"
+    autoNextHintText = msg
     showSeekHint(msg, hold = true)
 }
 
@@ -170,29 +241,149 @@ internal fun PlayerActivity.playAutoNextTarget(target: AutoNextTarget) {
     }
 }
 
-internal fun PlayerActivity.maybeUpdateAutoNext(posMs: Long, durationMs: Long) {
+internal fun PlayerActivity.armAutoNextAfterEnded(reason: String) {
+    if (autoNextAfterEndedArmed) return
+    autoNextAfterEndedArmed = true
+    trace?.log("autonext:ended", "action=arm reason=$reason")
+}
+
+internal fun PlayerActivity.pauseAutoNextAfterEnded(reason: String) {
+    val hadHint = autoNextHintVisible
+    val hadPending = autoNextPending != null
+    val hadJob = autoNextAfterEndedJob != null
+    autoNextAfterEndedToken = 0L
+    autoNextAfterEndedJob?.cancel()
+    autoNextAfterEndedJob = null
+    autoNextPending = null
+    dismissAutoNextHint()
+    if (hadHint || hadPending || hadJob) {
+        trace?.log(
+            "autonext:ended",
+            "action=pause reason=$reason hint=${if (hadHint) 1 else 0} pending=${if (hadPending) 1 else 0} job=${if (hadJob) 1 else 0}",
+        )
+    }
+}
+
+internal fun PlayerActivity.maybeStartAutoNextAfterEndedCountdown() {
+    if (!autoNextAfterEndedArmed) return
     val engine = player ?: return
-    if (durationMs <= 0L) {
-        clearAutoNextState(reason = "no_duration", resetUserCancellation = false)
+    if (engine.playbackState != Player.STATE_ENDED) {
+        clearAutoNextState(reason = "ended_left_state", resetUserCancellation = false)
         return
     }
+    if (autoNextCancelledByUser) {
+        clearAutoNextState(reason = "ended_cancelled", resetUserCancellation = false)
+        return
+    }
+
+    val mode = resolvedPlaybackMode()
+    if (!autoNextModeAllowsNext(mode)) {
+        clearAutoNextState(reason = "ended_mode", resetUserCancellation = false)
+        return
+    }
+
+    if (isAutoNextUiBlocked()) {
+        pauseAutoNextAfterEnded(reason = "ui_blocked")
+        return
+    }
+
+    // Clear stale completed job reference.
+    autoNextAfterEndedJob?.let { job ->
+        if (!job.isActive) autoNextAfterEndedJob = null
+    }
+    if (autoNextAfterEndedJob != null) return
+
+    // Proactively warm up recommendations during the countdown window.
+    maybeWarmUpAutoNextTarget()
+
+    val target = resolveAutoNextTargetByPlaybackMode(preloadRecommendation = true)
+    if (target != null) {
+        showAutoNextHint(target)
+    } else {
+        showAutoNextHintFallback(autoNextFallbackTitleForMode(mode))
+    }
+
+    val token = SystemClock.uptimeMillis()
+    autoNextAfterEndedToken = token
+    autoNextAfterEndedJob =
+        lifecycleScope.launch {
+            delay(PlayerActivity.AUTO_NEXT_PREVIEW_WINDOW_MS)
+            if (autoNextAfterEndedToken != token) return@launch
+            autoNextAfterEndedJob = null
+
+            val engineNow = player ?: return@launch
+            if (!autoNextAfterEndedArmed) return@launch
+            if (engineNow.playbackState != Player.STATE_ENDED) {
+                clearAutoNextState(reason = "ended_left_state", resetUserCancellation = false)
+                return@launch
+            }
+            if (autoNextCancelledByUser) {
+                clearAutoNextState(reason = "ended_cancelled", resetUserCancellation = false)
+                return@launch
+            }
+            val modeNow = resolvedPlaybackMode()
+            if (!autoNextModeAllowsNext(modeNow)) {
+                clearAutoNextState(reason = "ended_mode", resetUserCancellation = false)
+                return@launch
+            }
+            if (isAutoNextUiBlocked()) {
+                pauseAutoNextAfterEnded(reason = "ui_blocked_fire")
+                return@launch
+            }
+
+            val targetNow = autoNextPending ?: resolveAutoNextTargetByPlaybackMode(preloadRecommendation = false)
+            // Disarm before executing: after the countdown fires, BACK should go back to normal behavior.
+            autoNextAfterEndedArmed = false
+            autoNextAfterEndedToken = 0L
+            autoNextPending = null
+            dismissAutoNextHint()
+            trace?.log(
+                "autonext:ended",
+                "action=play mode=$modeNow target=${targetNow?.javaClass?.simpleName ?: "fallback"}",
+            )
+            if (targetNow != null) {
+                playAutoNextTarget(targetNow)
+            } else {
+                playNextByPlaybackMode(userInitiated = false)
+            }
+        }
+}
+
+internal fun PlayerActivity.maybeUpdateAutoNext(posMs: Long, durationMs: Long) {
+    val engine = player ?: return
     if (engine.playbackState == Player.STATE_ENDED) {
-        clearAutoNextState(reason = "ended", resetUserCancellation = false)
+        // After END we defer auto-next until all OSD/panels are fully closed.
+        maybeStartAutoNextAfterEndedCountdown()
+        return
+    }
+
+    // If playback resumed (or user restarted), ensure any ended countdown is fully disarmed.
+    if (autoNextAfterEndedArmed || autoNextAfterEndedJob != null) {
+        clearAutoNextState(reason = "left_ended", resetUserCancellation = false)
+    }
+
+    if (durationMs <= 0L) {
+        clearAutoNextPreviewState(reason = "no_duration", resetUserCancellation = false)
         return
     }
 
     val remainingMs = durationMs - posMs
     if (remainingMs > PlayerActivity.AUTO_NEXT_PREVIEW_WINDOW_MS) {
-        clearAutoNextState(reason = "outside_window", resetUserCancellation = true)
+        clearAutoNextPreviewState(reason = "outside_window", resetUserCancellation = true)
         return
     }
     // At (or beyond) the end we rely on STATE_ENDED to handle the actual transition; do NOT reset
     // user cancellation here, otherwise a "BACK to cancel" can be accidentally cleared right before ENDED.
     if (remainingMs <= 0L) return
 
+    if (isAutoNextUiBlocked()) {
+        clearAutoNextPreviewState(reason = "ui_blocked", resetUserCancellation = false)
+        return
+    }
+
     // While the user is scrubbing, suppress auto-next hint to avoid distracting UI jumps.
     if (scrubbing) {
-        clearAutoNextState(reason = "blocked", resetUserCancellation = false)
+        clearAutoNextPreviewState(reason = "blocked", resetUserCancellation = false)
         return
     }
 
@@ -200,7 +391,7 @@ internal fun PlayerActivity.maybeUpdateAutoNext(posMs: Long, durationMs: Long) {
 
     val target = resolveAutoNextTargetByPlaybackMode(preloadRecommendation = true)
     if (target == null) {
-        clearAutoNextState(reason = "unresolved", resetUserCancellation = false)
+        clearAutoNextPreviewState(reason = "unresolved", resetUserCancellation = false)
         return
     }
 

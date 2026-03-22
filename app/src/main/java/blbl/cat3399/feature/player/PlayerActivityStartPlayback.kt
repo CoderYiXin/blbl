@@ -804,9 +804,6 @@ internal fun PlayerActivity.handlePlaybackEnded(engine: BlblPlayerEngine) {
     lastEndedActionAtMs = now
 
     val mode = resolvedPlaybackMode()
-    val pendingTarget = autoNextPending
-    autoNextPending = null
-    dismissAutoNextHint()
 
     when (mode) {
         AppPrefs.PLAYER_PLAYBACK_MODE_NONE -> Unit
@@ -826,13 +823,31 @@ internal fun PlayerActivity.handlePlaybackEnded(engine: BlblPlayerEngine) {
                 trace?.log("autonext:ended", "action=stay mode=$mode")
                 return
             }
-            val target = pendingTarget ?: resolveAutoNextTargetByPlaybackMode(preloadRecommendation = false)
-            if (target != null) {
-                trace?.log("autonext:ended", "action=play mode=$mode target=${target.javaClass.simpleName}")
-                playAutoNextTarget(target)
-            } else {
-                playNextByPlaybackMode(userInitiated = false)
+
+            // When any OSD/panels are visible, do NOT auto-next and do NOT show the hint.
+            // We only show "即将播放 ..." + start the 2s countdown after the UI is fully closed.
+            if (isAutoNextUiBlocked()) {
+                armAutoNextAfterEnded(reason = "ended_ui_blocked")
+                pauseAutoNextAfterEnded(reason = "ended_ui_blocked")
+                trace?.log("autonext:ended", "action=defer mode=$mode reason=ui_blocked")
+                return
             }
+
+            // If the hint was already shown during playback, keep the old behavior: transition immediately.
+            // Otherwise, show it now and delay by 2 seconds so BACK can cancel.
+            if (autoNextHintVisible) {
+                val target = autoNextPending ?: resolveAutoNextTargetByPlaybackMode(preloadRecommendation = false)
+                if (target != null) {
+                    trace?.log("autonext:ended", "action=play mode=$mode target=${target.javaClass.simpleName}")
+                    playAutoNextTarget(target)
+                } else {
+                    playNextByPlaybackMode(userInitiated = false)
+                }
+                return
+            }
+
+            armAutoNextAfterEnded(reason = "ended_no_hint")
+            maybeStartAutoNextAfterEndedCountdown()
         }
 
         else -> Unit

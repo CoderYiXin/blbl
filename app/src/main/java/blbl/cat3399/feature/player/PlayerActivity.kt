@@ -127,6 +127,9 @@ class PlayerActivity : BaseActivity() {
     internal var autoSkipHintText: String? = null
     internal var autoNextHintVisible: Boolean = false
     internal var autoNextHintText: String? = null
+    internal var autoNextAfterEndedArmed: Boolean = false
+    internal var autoNextAfterEndedJob: kotlinx.coroutines.Job? = null
+    internal var autoNextAfterEndedToken: Long = 0L
     private var reportProgressJob: kotlinx.coroutines.Job? = null
     internal var autoHideJob: kotlinx.coroutines.Job? = null
     internal var seekOsdHideJob: kotlinx.coroutines.Job? = null
@@ -1398,7 +1401,9 @@ class PlayerActivity : BaseActivity() {
             KeyEvent.KEYCODE_BACK -> {
                 val cancelledAutoResume = autoResumeHintVisible
                 val cancelledAutoSkip = autoSkipHintVisible || autoSkipPending != null
-                val cancelledAutoNext = autoNextHintVisible || autoNextPending != null
+                // Only treat BACK as "cancel auto-next" when the user can actually see the hint.
+                // If we're deferring auto-next due to OSD/panels, BACK should close those first.
+                val cancelledAutoNext = autoNextHintVisible
                 if (cancelledAutoResume) cancelPendingAutoResume(reason = "back")
                 if (cancelledAutoSkip) cancelPendingAutoSkip(reason = "back", markIgnored = true)
                 if (cancelledAutoNext) cancelPendingAutoNext(reason = "back", markCancelledByUser = true)
