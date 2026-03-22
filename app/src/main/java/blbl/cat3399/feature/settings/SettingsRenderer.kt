@@ -85,6 +85,10 @@ class SettingsRenderer(
             }
 
         state.currentSectionIndex = index
+        if (index in 0 until leftAdapter.itemCount) {
+            state.lastFocusedLeftIndex = index
+            leftAdapter.setSelected(index)
+        }
         val sectionName = sections.getOrNull(index)
         val entries = buildEntriesForSection(sectionName)
         rightAdapter.submit(entries)
@@ -125,7 +129,21 @@ class SettingsRenderer(
             return true
         }
 
-        val rightId = state.pendingRestoreRightId ?: state.lastFocusedRightId
+        state.pendingRestoreRightId?.let { pendingRightId ->
+            if (focusRightById(pendingRightId)) return true
+            state.pendingRestoreRightId = null
+        }
+
+        val currentFocus = activity.currentFocus
+        if (currentFocus?.isAttachedToWindow == true) {
+            when {
+                currentFocus == binding.btnBack -> return true
+                FocusTreeUtils.isDescendantOf(currentFocus, binding.recyclerLeft) -> return true
+                FocusTreeUtils.isDescendantOf(currentFocus, binding.recyclerRight) -> return true
+            }
+        }
+
+        val rightId = state.lastFocusedRightId
         if (rightId != null) {
             if (focusRightById(rightId)) return true
         }
@@ -443,32 +461,50 @@ class SettingsRenderer(
 
     private fun focusRightAt(position: Int): Boolean {
         if (position < 0 || position >= rightAdapter.itemCount) return false
-        val token = ++state.focusRequestToken
         val layoutManager = binding.recyclerRight.layoutManager as? LinearLayoutManager
-        if (layoutManager != null) {
-            val first = layoutManager.findFirstVisibleItemPosition()
-            val last = layoutManager.findLastVisibleItemPosition()
-            if (position < first || position > last) {
-                layoutManager.scrollToPositionWithOffset(position, 0)
-            }
-        }
-        binding.recyclerRight.doOnPreDraw {
-            if (token != state.focusRequestToken) return@doOnPreDraw
-            binding.recyclerRight.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus()
-        }
-        return true
+        return focusRecyclerItemAt(
+            recyclerView = binding.recyclerRight,
+            position = position,
+            shouldScroll = { isPositionOutsideVisibleRange(layoutManager, position) },
+            scroll = { layoutManager?.scrollToPositionWithOffset(position, 0) },
+        )
     }
 
     private fun focusLeftAt(position: Int): Boolean {
         if (position < 0 || position >= leftAdapter.itemCount) return false
+        val layoutManager = binding.recyclerLeft.layoutManager as? LinearLayoutManager
+        return focusRecyclerItemAt(
+            recyclerView = binding.recyclerLeft,
+            position = position,
+            shouldScroll = { isPositionOutsideVisibleRange(layoutManager, position) },
+            scroll = { binding.recyclerLeft.scrollToPosition(position) },
+        )
+    }
+
+    private fun focusRecyclerItemAt(
+        recyclerView: RecyclerView,
+        position: Int,
+        shouldScroll: () -> Boolean,
+        scroll: () -> Unit,
+    ): Boolean {
         val token = ++state.focusRequestToken
-        val holder = binding.recyclerLeft.findViewHolderForAdapterPosition(position)
+        val holder = recyclerView.findViewHolderForAdapterPosition(position)
         if (holder?.itemView?.requestFocus() == true) return true
-        binding.recyclerLeft.scrollToPosition(position)
-        binding.recyclerLeft.doOnPreDraw {
+        if (shouldScroll()) {
+            scroll()
+        }
+        recyclerView.doOnPreDraw {
             if (token != state.focusRequestToken) return@doOnPreDraw
-            binding.recyclerLeft.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus()
+            recyclerView.findViewHolderForAdapterPosition(position)?.itemView?.requestFocus()
         }
         return true
+    }
+
+    private fun isPositionOutsideVisibleRange(layoutManager: LinearLayoutManager?, position: Int): Boolean {
+        if (layoutManager == null) return true
+        val first = layoutManager.findFirstVisibleItemPosition()
+        val last = layoutManager.findLastVisibleItemPosition()
+        if (first == RecyclerView.NO_POSITION || last == RecyclerView.NO_POSITION) return true
+        return position < first || position > last
     }
 }
