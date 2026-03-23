@@ -3,6 +3,7 @@ package blbl.cat3399.core.prefs
 import android.content.Context
 import android.provider.Settings
 import org.json.JSONArray
+import org.json.JSONObject
 import java.util.UUID
 import kotlin.math.roundToInt
 
@@ -685,6 +686,32 @@ class AppPrefs(context: Context) {
         prefs.edit().remove(KEY_SEARCH_HISTORY).apply()
     }
 
+    fun exportConfigSnapshotJson(): JSONObject =
+        SharedPreferencesSnapshot.encode(
+            prefs = prefs,
+            excludeKeys = CREDENTIAL_KEYS,
+        )
+
+    fun exportCredentialsSnapshotJson(): JSONObject =
+        SharedPreferencesSnapshot.encode(
+            prefs = prefs,
+            includeKeys = CREDENTIAL_KEYS,
+        )
+
+    fun replaceConfigFromSnapshotJson(root: JSONObject) =
+        SharedPreferencesSnapshot.replaceAll(
+            prefs = prefs,
+            root = root,
+            excludeKeys = CREDENTIAL_KEYS,
+        )
+
+    fun replaceCredentialsFromSnapshotJson(root: JSONObject) =
+        SharedPreferencesSnapshot.replaceAll(
+            prefs = prefs,
+            root = root,
+            includeKeys = CREDENTIAL_KEYS,
+        )
+
     private fun loadStringList(key: String): List<String> {
         val raw = prefs.getString(key, null) ?: return emptyList()
         return runCatching {
@@ -843,6 +870,15 @@ class AppPrefs(context: Context) {
         private const val KEY_SEARCH_HISTORY = "search_history"
         private const val KEY_GAIA_VGATE_V_VOUCHER = "gaia_vgate_v_voucher"
         private const val KEY_GAIA_VGATE_V_VOUCHER_SAVED_AT_MS = "gaia_vgate_v_voucher_saved_at_ms"
+
+        private val CREDENTIAL_KEYS: Set<String> =
+            setOf(
+                KEY_WEB_REFRESH_TOKEN,
+                KEY_WEB_COOKIE_REFRESH_CHECKED_EPOCH_DAY,
+                KEY_BILI_TICKET_CHECKED_EPOCH_DAY,
+                KEY_GAIA_VGATE_V_VOUCHER,
+                KEY_GAIA_VGATE_V_VOUCHER_SAVED_AT_MS,
+            )
 
         // PC browser UA is used to reduce CDN 403 for media resources.
         const val DEFAULT_UA =

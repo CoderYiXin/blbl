@@ -72,28 +72,10 @@ class SettingsInteractionHandler(
 ) {
     lateinit var renderer: SettingsRenderer
 
-    private sealed interface PendingDocumentExport {
-        data class Logs(
-            val prepared: PreparedLogsExport,
-        ) : PendingDocumentExport
-
-        data class Config(
-            val prepared: PreparedConfigExport,
-        ) : PendingDocumentExport
-    }
-
     private data class PreparedLogsExport(
         val fileName: String,
         val nowMs: Long,
-        val metaJson: String,
-    )
-
-    private data class PreparedConfigExport(
-        val requestedMode: AppConfigBackup.ExportMode,
-        val effectiveMode: AppConfigBackup.ExportMode,
-        val fileName: String,
-        val jsonText: String,
-        val hasCredentials: Boolean,
+        val extras: List<LogExporter.ZipExtra>,
     )
 
     private var testUpdateJob: Job? = null
@@ -103,7 +85,7 @@ class SettingsInteractionHandler(
     private var clearCacheJob: Job? = null
     private var cacheSizeJob: Job? = null
     private var configTransferJob: Job? = null
-    private var pendingDocumentExport: PendingDocumentExport? = null
+    private var pendingDocumentExport: ((Uri) -> Unit)? = null
 
     fun onSectionShown(sectionName: String) {
         when (sectionName) {
@@ -126,13 +108,10 @@ class SettingsInteractionHandler(
     }
 
     fun onExportDocumentSelected(uri: Uri?) {
-        val request = pendingDocumentExport
+        val export = pendingDocumentExport
         pendingDocumentExport = null
-        if (uri == null || request == null) return
-        when (request) {
-            is PendingDocumentExport.Logs -> exportLogsToUri(uri = uri, prepared = request.prepared)
-            is PendingDocumentExport.Config -> exportConfigToUri(uri = uri, prepared = request.prepared)
-        }
+        if (uri == null || export == null) return
+        export(uri)
     }
 
     fun onImportConfigSelected(uri: Uri?) {
@@ -146,62 +125,42 @@ class SettingsInteractionHandler(
     ) {
         exportLogsJob?.cancel()
         exportLogsJob =
-            activity.lifecycleScope.launch {
-                AppToast.show(activity, "正在导出日志…")
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        LogExporter.exportToUri(
-                            context = activity,
-                            uri = uri,
-                            nowMs = prepared.nowMs,
-                            fileNameOverride = prepared.fileName,
-                            extras =
-                                listOf(
-                                    LogExporter.ZipExtra(
-                                        path = "meta.json",
-                                        bytes = prepared.metaJson.toByteArray(Charsets.UTF_8),
-                                    ),
-                                ),
-                        )
-                    }
-                }.onSuccess { result ->
-                    AppToast.showLong(activity, "已导出：${result.fileName}（${result.includedFiles}个文件）")
-                }.onFailure { t ->
-                    AppLog.w("Settings", "export logs failed", t)
-                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
-                    AppToast.showLong(activity, "导出失败：$msg")
-                }
+            launchIoJob(
+                startToast = "正在导出日志…",
+                failureLogMessage = "export logs failed",
+                failureToastPrefix = "导出失败",
+                work = {
+                    LogExporter.exportToUri(
+                        context = activity,
+                        uri = uri,
+                        nowMs = prepared.nowMs,
+                        fileNameOverride = prepared.fileName,
+                        extras = prepared.extras,
+                    )
+                },
+            ) { result ->
+                AppToast.showLong(activity, "已导出：${result.fileName}（${result.includedFiles}个文件）")
             }
     }
 
     private fun exportLogsToLocalFile(prepared: PreparedLogsExport) {
         exportLogsJob?.cancel()
         exportLogsJob =
-            activity.lifecycleScope.launch {
-                AppToast.show(activity, "正在导出日志到本地…")
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        LogExporter.exportToLocalFile(
-                            context = activity,
-                            nowMs = prepared.nowMs,
-                            fileNameOverride = prepared.fileName,
-                            extras =
-                                listOf(
-                                    LogExporter.ZipExtra(
-                                        path = "meta.json",
-                                        bytes = prepared.metaJson.toByteArray(Charsets.UTF_8),
-                                    ),
-                                ),
-                        )
-                    }
-                }.onSuccess { result ->
-                    val path = result.file.absolutePath
-                    AppToast.showLong(activity, "无法打开保存文件，已导出到本地：${result.fileName}（${result.includedFiles}个文件）\n路径：$path")
-                }.onFailure { t ->
-                    AppLog.w("Settings", "export logs (local) failed", t)
-                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
-                    AppToast.showLong(activity, "导出失败：$msg")
-                }
+            launchIoJob(
+                startToast = "正在导出日志到本地…",
+                failureLogMessage = "export logs (local) failed",
+                failureToastPrefix = "导出失败",
+                work = {
+                    LogExporter.exportToLocalFile(
+                        context = activity,
+                        nowMs = prepared.nowMs,
+                        fileNameOverride = prepared.fileName,
+                        extras = prepared.extras,
+                    )
+                },
+            ) { result ->
+                val path = result.file.absolutePath
+                AppToast.showLong(activity, "无法打开保存文件，已导出到本地：${result.fileName}（${result.includedFiles}个文件）\n路径：$path")
             }
     }
 
@@ -220,7 +179,7 @@ class SettingsInteractionHandler(
                     },
                     PopupAction(
                         role = PopupActionRole.NEUTRAL,
-                        text = "导出配置与登录凭证",
+                        text = "导出配置与登录状态",
                     ) {
                         startConfigExport(AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS)
                     },
@@ -238,20 +197,17 @@ class SettingsInteractionHandler(
             val tv =
                 LayoutInflater.from(dialogContext)
                     .inflate(R.layout.view_popup_message, null, false) as TextView
-            tv.text = "可导出当前配置，也可选附带登录凭证；导入时会自动检测是否包含登录信息。"
+            tv.text = "可导出当前配置，也可选包含当前登录状态；导入时会按文件内容整包覆盖。"
             tv
         }
     }
 
     private fun startConfigExport(mode: AppConfigBackup.ExportMode) {
-        if (configTransferJob?.isActive == true) {
-            AppToast.show(activity, "正在处理配置…")
-            return
-        }
+        if (!ensureConfigTransferIdle()) return
         val prepared = prepareConfigExport(mode)
         launchDocumentExport(
-            pending = PendingDocumentExport.Config(prepared),
             request = CreateDocumentRequest(mimeType = AppConfigBackup.JSON_MIME, fileName = prepared.fileName),
+            onUriSelected = { uri -> exportConfigToUri(uri = uri, prepared = prepared) },
             onFallbackToLocal = { exportConfigToLocalFile(prepared) },
             logTag = "config",
         )
@@ -259,65 +215,49 @@ class SettingsInteractionHandler(
 
     private fun exportConfigToUri(
         uri: Uri,
-        prepared: PreparedConfigExport,
+        prepared: AppConfigBackup.PreparedExport,
     ) {
         configTransferJob =
-            activity.lifecycleScope.launch {
-                AppToast.show(activity, exportStartToast(prepared))
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        DocumentExporter.exportToUri(
-                            context = activity,
-                            uri = uri,
-                            fileName = prepared.fileName,
-                        ) { out ->
-                            out.write(prepared.jsonText.toByteArray(Charsets.UTF_8))
-                        }
+            launchIoJob(
+                startToast = exportStartToast(prepared.mode),
+                failureLogMessage = "export config failed",
+                failureToastPrefix = "导出失败",
+                work = {
+                    DocumentExporter.exportToUri(
+                        context = activity,
+                        uri = uri,
+                        fileName = prepared.fileName,
+                    ) { out ->
+                        out.write(prepared.jsonText.toByteArray(Charsets.UTF_8))
                     }
-                }.onSuccess { result ->
-                    AppToast.showLong(activity, buildConfigExportSuccessText(prepared = prepared, suffix = "已导出：${result.fileName}"))
-                }.onFailure { t ->
-                    AppLog.w("Settings", "export config failed", t)
-                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
-                    AppToast.showLong(activity, "导出失败：$msg")
-                }
+                },
+            ) { result ->
+                AppToast.showLong(activity, "已导出：${result.fileName}")
             }
     }
 
-    private fun exportConfigToLocalFile(prepared: PreparedConfigExport) {
-        if (configTransferJob?.isActive == true) {
-            AppToast.show(activity, "正在处理配置…")
-            return
-        }
+    private fun exportConfigToLocalFile(prepared: AppConfigBackup.PreparedExport) {
         configTransferJob =
-            activity.lifecycleScope.launch {
-                AppToast.show(activity, "${exportStartToast(prepared)}到本地…")
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        DocumentExporter.exportToLocalFile(
-                            context = activity,
-                            fileName = prepared.fileName,
-                            subDir = "exports",
-                        ) { out ->
-                            out.write(prepared.jsonText.toByteArray(Charsets.UTF_8))
-                        }
+            launchIoJob(
+                startToast = "${exportStartToast(prepared.mode)}到本地…",
+                failureLogMessage = "export config (local) failed",
+                failureToastPrefix = "导出失败",
+                work = {
+                    DocumentExporter.exportToLocalFile(
+                        context = activity,
+                        fileName = prepared.fileName,
+                        subDir = "exports",
+                    ) { out ->
+                        out.write(prepared.jsonText.toByteArray(Charsets.UTF_8))
                     }
-                }.onSuccess { result ->
-                    val suffix = "无法打开保存文件，已导出到本地：${result.fileName}\n路径：${result.file.absolutePath}"
-                    AppToast.showLong(activity, buildConfigExportSuccessText(prepared = prepared, suffix = suffix))
-                }.onFailure { t ->
-                    AppLog.w("Settings", "export config (local) failed", t)
-                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
-                    AppToast.showLong(activity, "导出失败：$msg")
-                }
+                },
+            ) { result ->
+                AppToast.showLong(activity, "无法打开保存文件，已导出到本地：${result.fileName}\n路径：${result.file.absolutePath}")
             }
     }
 
     private fun startImportConfig() {
-        if (configTransferJob?.isActive == true) {
-            AppToast.show(activity, "正在处理配置…")
-            return
-        }
+        if (!ensureConfigTransferIdle()) return
         try {
             importConfigLauncher.launch(arrayOf(AppConfigBackup.JSON_MIME, "text/plain", "application/octet-stream"))
         } catch (e: ActivityNotFoundException) {
@@ -330,37 +270,30 @@ class SettingsInteractionHandler(
     }
 
     private fun importConfigFromUri(uri: Uri) {
-        if (configTransferJob?.isActive == true) {
-            AppToast.show(activity, "正在处理配置…")
-            return
-        }
+        if (!ensureConfigTransferIdle()) return
         configTransferJob =
-            activity.lifecycleScope.launch {
-                AppToast.show(activity, "正在读取配置…")
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        val text =
-                            activity.contentResolver.openInputStream(uri)?.use { input ->
-                                input.readBytes().toString(Charsets.UTF_8).removePrefix("\uFEFF")
-                            } ?: error("无法读取配置文件")
-                        AppConfigBackup.parse(text)
-                    }
-                }.onSuccess { parsed ->
-                    showImportConfigConfirmDialog(parsed)
-                }.onFailure { t ->
-                    AppLog.w("Settings", "import config read failed", t)
-                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
-                    AppToast.showLong(activity, "读取配置失败：$msg")
-                }
+            launchIoJob(
+                startToast = "正在读取配置…",
+                failureLogMessage = "import config read failed",
+                failureToastPrefix = "读取配置失败",
+                work = {
+                    val text =
+                        activity.contentResolver.openInputStream(uri)?.use { input ->
+                            input.readBytes().toString(Charsets.UTF_8).removePrefix("\uFEFF")
+                        } ?: error("无法读取配置文件")
+                    AppConfigBackup.parse(text)
+                },
+            ) { parsed ->
+                showImportConfigConfirmDialog(parsed)
             }
     }
 
     private fun showImportConfigConfirmDialog(parsed: AppConfigBackup.ParsedBackup) {
         val message =
-            if (parsed.hasCredentials) {
-                "检测到登录凭证。\n导入后将覆盖当前配置和登录状态，并重启应用。"
+            if (parsed.includesCredentials) {
+                "该文件包含登录状态部分。\n导入后将覆盖当前配置和登录状态，并重启应用。"
             } else {
-                "未检测到登录凭证。\n导入后只覆盖当前配置，保留当前登录状态，并重启应用。"
+                "该文件仅包含配置部分。\n导入后只覆盖当前配置，保留当前登录状态，并重启应用。"
             }
         AppPopup.confirm(
             context = activity,
@@ -376,63 +309,36 @@ class SettingsInteractionHandler(
     }
 
     private fun applyImportedConfig(parsed: AppConfigBackup.ParsedBackup) {
-        if (configTransferJob?.isActive == true) {
-            AppToast.show(activity, "正在处理配置…")
-            return
-        }
+        if (!ensureConfigTransferIdle()) return
         configTransferJob =
-            activity.lifecycleScope.launch {
-                AppToast.show(activity, if (parsed.hasCredentials) "正在导入配置与登录凭证…" else "正在导入配置…")
-                runCatching {
-                    withContext(Dispatchers.IO) {
-                        AppConfigBackup.apply(parsed, prefs = BiliClient.prefs, cookies = BiliClient.cookies)
-                    }
-                }.onSuccess {
-                    LauncherAliasManager.sync(activity.applicationContext, BiliClient.prefs.themePreset)
-                    evictNetworkConnections()
-                    AppToast.showLong(activity, if (parsed.hasCredentials) "已导入配置与登录凭证，正在重启…" else "已导入配置，正在重启…")
-                    restartToMain()
-                }.onFailure { t ->
-                    AppLog.w("Settings", "apply config failed", t)
-                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
-                    AppToast.showLong(activity, "导入失败：$msg")
-                }
+            launchIoJob(
+                startToast = if (parsed.includesCredentials) "正在导入配置与登录状态…" else "正在导入配置…",
+                failureLogMessage = "apply config failed",
+                failureToastPrefix = "导入失败",
+                work = {
+                    AppConfigBackup.apply(parsed, prefs = BiliClient.prefs, cookies = BiliClient.cookies)
+                },
+            ) {
+                LauncherAliasManager.sync(activity.applicationContext, BiliClient.prefs.themePreset)
+                evictNetworkConnections()
+                AppToast.showLong(activity, if (parsed.includesCredentials) "已导入配置与登录状态，正在重启…" else "已导入配置，正在重启…")
+                restartToMain()
             }
     }
 
-    private fun prepareConfigExport(mode: AppConfigBackup.ExportMode): PreparedConfigExport {
-        val nowMs = System.currentTimeMillis()
-        val hasCredentials = mode == AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS &&
-            (BiliClient.cookies.hasSessData() || !BiliClient.prefs.webRefreshToken.isNullOrBlank())
-        val effectiveMode = if (hasCredentials) AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS else AppConfigBackup.ExportMode.CONFIG_ONLY
-        return PreparedConfigExport(
-            requestedMode = mode,
-            effectiveMode = effectiveMode,
-            fileName = AppConfigBackup.buildFileName(mode = effectiveMode, nowMs = nowMs),
-            jsonText = AppConfigBackup.buildJson(prefs = BiliClient.prefs, cookies = BiliClient.cookies, mode = effectiveMode, nowMs = nowMs),
-            hasCredentials = hasCredentials,
+    private fun prepareConfigExport(mode: AppConfigBackup.ExportMode): AppConfigBackup.PreparedExport {
+        return AppConfigBackup.prepareExport(
+            prefs = BiliClient.prefs,
+            cookies = BiliClient.cookies,
+            mode = mode,
         )
     }
 
-    private fun exportStartToast(prepared: PreparedConfigExport): String {
-        return if (prepared.effectiveMode == AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS) {
-            "正在导出配置与登录凭证…"
+    private fun exportStartToast(mode: AppConfigBackup.ExportMode): String {
+        return if (mode == AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS) {
+            "正在导出配置与登录状态…"
         } else {
             "正在导出配置…"
-        }
-    }
-
-    private fun buildConfigExportSuccessText(
-        prepared: PreparedConfigExport,
-        suffix: String,
-    ): String {
-        return if (
-            prepared.requestedMode == AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS &&
-            !prepared.hasCredentials
-        ) {
-            "当前未检测到登录凭证，已按纯配置导出。\n$suffix"
-        } else {
-            suffix
         }
     }
 
@@ -740,20 +646,21 @@ class SettingsInteractionHandler(
 
     private fun prepareLogsExport(nowMs: Long = System.currentTimeMillis()): PreparedLogsExport {
         val deviceUuid = BiliClient.prefs.deviceUuid
+        val metaJson = buildUploadMetaJson(nowMs = nowMs, deviceUuid = deviceUuid)
         return PreparedLogsExport(
             fileName = LogExporter.suggestExportFileName(nowMs = nowMs),
             nowMs = nowMs,
-            metaJson = buildUploadMetaJson(nowMs = nowMs, deviceUuid = deviceUuid),
+            extras = buildLogExportExtras(metaJson),
         )
     }
 
     private fun launchDocumentExport(
-        pending: PendingDocumentExport,
         request: CreateDocumentRequest,
+        onUriSelected: (Uri) -> Unit,
         onFallbackToLocal: () -> Unit,
         logTag: String,
     ) {
-        pendingDocumentExport = pending
+        pendingDocumentExport = onUriSelected
         try {
             exportDocumentLauncher.launch(request)
         } catch (e: ActivityNotFoundException) {
@@ -765,6 +672,46 @@ class SettingsInteractionHandler(
             AppLog.w("Settings", "open $logTag export picker failed; fallback to local export", t)
             onFallbackToLocal()
         }
+    }
+
+    private fun ensureConfigTransferIdle(): Boolean {
+        if (configTransferJob?.isActive == true) {
+            AppToast.show(activity, "正在处理配置…")
+            return false
+        }
+        return true
+    }
+
+    private fun buildLogExportExtras(metaJson: String): List<LogExporter.ZipExtra> {
+        return listOf(
+            LogExporter.ZipExtra(
+                path = "meta.json",
+                bytes = metaJson.toByteArray(Charsets.UTF_8),
+            ),
+        )
+    }
+
+    private fun <T> launchIoJob(
+        startToast: String,
+        failureLogMessage: String,
+        failureToastPrefix: String,
+        work: suspend () -> T,
+        onSuccess: (T) -> Unit,
+    ): Job {
+        return activity.lifecycleScope.launch {
+            AppToast.show(activity, startToast)
+            runCatching {
+                withContext(Dispatchers.IO) { work() }
+            }.onSuccess(onSuccess)
+                .onFailure { t ->
+                    AppLog.w("Settings", failureLogMessage, t)
+                    AppToast.showLong(activity, "$failureToastPrefix：${throwableMessage(t)}")
+                }
+        }
+    }
+
+    private fun throwableMessage(t: Throwable): String {
+        return t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
     }
 
     fun onEntryClicked(entry: SettingEntry) {
@@ -824,8 +771,8 @@ class SettingsInteractionHandler(
             SettingId.ExportLogs -> {
                 val prepared = prepareLogsExport()
                 launchDocumentExport(
-                    pending = PendingDocumentExport.Logs(prepared),
                     request = CreateDocumentRequest(mimeType = LogExporter.ZIP_MIME, fileName = prepared.fileName),
+                    onUriSelected = { uri -> exportLogsToUri(uri = uri, prepared = prepared) },
                     onFallbackToLocal = { exportLogsToLocalFile(prepared) },
                     logTag = "logs",
                 )

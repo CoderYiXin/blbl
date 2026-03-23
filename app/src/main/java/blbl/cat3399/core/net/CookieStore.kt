@@ -103,15 +103,23 @@ class CookieStore(
         return buildJsonRoot(includeExpired = includeExpired)
     }
 
-    fun replaceAllFromJson(root: JSONObject) {
+    fun replaceAllFromJson(
+        root: JSONObject,
+        sync: Boolean = false,
+    ) {
         val parsed = parseJsonRoot(root)
         store.clear()
         store.putAll(parsed)
-        persistToDisk()
+        persistToDisk(sync = sync)
     }
 
-    private fun persistToDisk() {
-        prefs.edit().putString("cookies", buildJsonRoot(includeExpired = true).toString()).apply()
+    private fun persistToDisk(sync: Boolean = false) {
+        val editor = prefs.edit().putString("cookies", buildJsonRoot(includeExpired = true).toString())
+        if (sync) {
+            check(editor.commit()) { "保存 Cookie 失败" }
+        } else {
+            editor.apply()
+        }
     }
 
     private fun loadFromDisk() {

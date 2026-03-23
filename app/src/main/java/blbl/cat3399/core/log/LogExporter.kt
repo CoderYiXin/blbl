@@ -15,6 +15,13 @@ import java.util.zip.ZipOutputStream
 object LogExporter {
     const val ZIP_MIME = "application/zip"
 
+    private data class ExportInput(
+        val appContext: Context,
+        val fileName: String,
+        val logFiles: List<File>,
+        val crashFile: File?,
+    )
+
     data class ZipExtra(
         /**
          * Path inside the zip, e.g. `meta.json` or `logs/extra.txt`.
@@ -42,30 +49,15 @@ object LogExporter {
         fileNameOverride: String? = null,
         extras: List<ZipExtra> = emptyList(),
     ): ExportResult {
-        val appContext = context.applicationContext
-        val logDir = AppLog.logDir(appContext)
-        val logFiles =
-            logDir.listFiles()?.asSequence()
-                ?.filter { it.isFile && it.name.endsWith(".log") }
-                ?.sortedBy { it.lastModified() }
-                ?.toList()
-                ?: emptyList()
-
-        val crashFile = CrashTracker.crashFile(appContext).takeIf { it.exists() && it.isFile }
-
-        if (logFiles.isEmpty() && crashFile == null) {
-            throw IOException("没有可导出的日志文件")
-        }
-
-        val fileName = resolveExportFileName(nowMs = nowMs, fileNameOverride = fileNameOverride)
+        val input = buildExportInput(context = context, nowMs = nowMs, fileNameOverride = fileNameOverride)
         val result =
             DocumentExporter.exportToUri(
-                context = appContext,
+                context = input.appContext,
                 uri = uri,
-                fileName = fileName,
+                fileName = input.fileName,
             ) { out ->
                 ZipOutputStream(out).use { zip ->
-                    writeZip(zip = zip, extras = extras, logFiles = logFiles, crashFile = crashFile)
+                    writeZip(zip = zip, extras = extras, logFiles = input.logFiles, crashFile = input.crashFile)
                 }
             }
 
@@ -78,30 +70,15 @@ object LogExporter {
         fileNameOverride: String? = null,
         extras: List<ZipExtra> = emptyList(),
     ): LocalExportResult {
-        val appContext = context.applicationContext
-        val logDir = AppLog.logDir(appContext)
-        val logFiles =
-            logDir.listFiles()?.asSequence()
-                ?.filter { it.isFile && it.name.endsWith(".log") }
-                ?.sortedBy { it.lastModified() }
-                ?.toList()
-                ?: emptyList()
-
-        val crashFile = CrashTracker.crashFile(appContext).takeIf { it.exists() && it.isFile }
-
-        if (logFiles.isEmpty() && crashFile == null) {
-            throw IOException("没有可导出的日志文件")
-        }
-
-        val fileName = resolveExportFileName(nowMs = nowMs, fileNameOverride = fileNameOverride)
+        val input = buildExportInput(context = context, nowMs = nowMs, fileNameOverride = fileNameOverride)
         val result =
             DocumentExporter.exportToLocalFile(
-                context = appContext,
-                fileName = fileName,
+                context = input.appContext,
+                fileName = input.fileName,
                 subDir = "exports",
             ) { out ->
                 ZipOutputStream(out).use { zip ->
-                    writeZip(zip = zip, extras = extras, logFiles = logFiles, crashFile = crashFile)
+                    writeZip(zip = zip, extras = extras, logFiles = input.logFiles, crashFile = input.crashFile)
                 }
             }
 
@@ -164,6 +141,29 @@ object LogExporter {
         nowMs: Long = System.currentTimeMillis(),
         fileNameOverride: String? = null,
     ): String = resolveExportFileName(nowMs = nowMs, fileNameOverride = fileNameOverride)
+
+    private fun buildExportInput(
+        context: Context,
+        nowMs: Long,
+        fileNameOverride: String?,
+    ): ExportInput {
+        val appContext = context.applicationContext
+        val logFiles =
+            AppLog.logDir(appContext)
+                .listFiles()?.asSequence()
+                ?.filter { it.isFile && it.name.endsWith(".log") }
+                ?.sortedBy { it.lastModified() }
+                ?.toList()
+                ?: emptyList()
+        val crashFile = CrashTracker.crashFile(appContext).takeIf { it.exists() && it.isFile }
+        if (logFiles.isEmpty() && crashFile == null) throw IOException("没有可导出的日志文件")
+        return ExportInput(
+            appContext = appContext,
+            fileName = resolveExportFileName(nowMs = nowMs, fileNameOverride = fileNameOverride),
+            logFiles = logFiles,
+            crashFile = crashFile,
+        )
+    }
 
     private fun sanitizeFileName(name: String): String {
         val trimmed = name.trim()
