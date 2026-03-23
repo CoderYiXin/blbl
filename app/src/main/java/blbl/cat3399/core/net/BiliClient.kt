@@ -104,6 +104,15 @@ object BiliClient {
         AppLog.i(TAG, "init ua=${prefs.userAgent.take(48)} cookiesSess=${cookies.hasSessData()}")
     }
 
+    fun clearLoginSession() {
+        cookies.clearAll()
+        prefs.webRefreshToken = null
+        prefs.webCookieRefreshCheckedEpochDay = -1L
+        prefs.biliTicketCheckedEpochDay = -1L
+        prefs.gaiaVgateVVoucher = null
+        prefs.gaiaVgateVVoucherSavedAtMs = -1L
+    }
+
     private fun clientFor(url: String, noCookies: Boolean = false): OkHttpClient {
         val host = runCatching { url.toHttpUrl().host }.getOrNull().orEmpty()
         return if (

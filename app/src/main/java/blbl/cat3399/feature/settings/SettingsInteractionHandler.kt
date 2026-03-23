@@ -20,11 +20,14 @@ import androidx.activity.result.ActivityResultLauncher
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import blbl.cat3399.R
 import blbl.cat3399.BuildConfig
+import blbl.cat3399.core.io.DocumentExporter
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.log.LogExporter
 import blbl.cat3399.core.log.LogUploadClient
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.prefs.AppConfigBackup
 import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.prefs.PlayerCustomShortcut
 import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
@@ -63,9 +66,26 @@ class SettingsInteractionHandler(
     private val activity: SettingsActivity,
     private val state: SettingsState,
     private val gaiaVgateLauncher: ActivityResultLauncher<Intent>,
-    private val exportLogsLauncher: ActivityResultLauncher<Uri?>,
+    private val exportTreeLauncher: ActivityResultLauncher<Uri?>,
+    private val importConfigLauncher: ActivityResultLauncher<Array<String>>,
 ) {
     lateinit var renderer: SettingsRenderer
+
+    private sealed interface PendingTreeExport {
+        data object Logs : PendingTreeExport
+
+        data class Config(
+            val mode: AppConfigBackup.ExportMode,
+        ) : PendingTreeExport
+    }
+
+    private data class PreparedConfigExport(
+        val requestedMode: AppConfigBackup.ExportMode,
+        val effectiveMode: AppConfigBackup.ExportMode,
+        val fileName: String,
+        val jsonText: String,
+        val hasCredentials: Boolean,
+    )
 
     private var testUpdateJob: Job? = null
     private var testUpdateCheckJob: Job? = null
@@ -73,6 +93,8 @@ class SettingsInteractionHandler(
     private var uploadLogsJob: Job? = null
     private var clearCacheJob: Job? = null
     private var cacheSizeJob: Job? = null
+    private var configTransferJob: Job? = null
+    private var pendingTreeExport: PendingTreeExport? = null
 
     fun onSectionShown(sectionName: String) {
         when (sectionName) {
@@ -94,9 +116,19 @@ class SettingsInteractionHandler(
         renderer.refreshSection(SettingId.GaiaVgate)
     }
 
-    fun onExportLogsSelected(uri: Uri?) {
+    fun onExportTreeSelected(uri: Uri?) {
+        val request = pendingTreeExport
+        pendingTreeExport = null
+        if (uri == null || request == null) return
+        when (request) {
+            PendingTreeExport.Logs -> exportLogsToTreeUri(uri)
+            is PendingTreeExport.Config -> exportConfigToTreeUri(uri = uri, mode = request.mode)
+        }
+    }
+
+    fun onImportConfigSelected(uri: Uri?) {
         if (uri == null) return
-        exportLogsToTreeUri(uri)
+        importConfigFromUri(uri)
     }
 
     private fun exportLogsToTreeUri(uri: Uri) {
@@ -163,6 +195,253 @@ class SettingsInteractionHandler(
                     AppToast.showLong(activity, "导出失败：$msg")
                 }
             }
+    }
+
+    private fun showConfigTransferDialog() {
+        AppPopup.custom(
+            context = activity,
+            title = "导出/入配置",
+            cancelable = true,
+            actions =
+                listOf(
+                    PopupAction(
+                        role = PopupActionRole.NEUTRAL,
+                        text = "导出配置",
+                    ) {
+                        startConfigExport(AppConfigBackup.ExportMode.CONFIG_ONLY)
+                    },
+                    PopupAction(
+                        role = PopupActionRole.NEUTRAL,
+                        text = "导出配置与登录凭证",
+                    ) {
+                        startConfigExport(AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS)
+                    },
+                    PopupAction(role = PopupActionRole.NEGATIVE, text = "关闭"),
+                    PopupAction(
+                        role = PopupActionRole.POSITIVE,
+                        text = "导入配置",
+                    ) {
+                        startImportConfig()
+                    },
+                ),
+            preferredActionRole = PopupActionRole.POSITIVE,
+            autoFocus = true,
+        ) { dialogContext ->
+            val tv =
+                LayoutInflater.from(dialogContext)
+                    .inflate(R.layout.view_popup_message, null, false) as TextView
+            tv.text = "可导出当前配置，也可选附带登录凭证；导入时会自动检测是否包含登录信息。"
+            tv
+        }
+    }
+
+    private fun startConfigExport(mode: AppConfigBackup.ExportMode) {
+        if (configTransferJob?.isActive == true) {
+            AppToast.show(activity, "正在处理配置…")
+            return
+        }
+        if (!canOpenDocumentTree()) {
+            exportConfigToLocalFile(mode)
+            return
+        }
+        pendingTreeExport = PendingTreeExport.Config(mode)
+        try {
+            exportTreeLauncher.launch(null)
+        } catch (e: ActivityNotFoundException) {
+            pendingTreeExport = null
+            AppLog.w("Settings", "OpenDocumentTree not supported; fallback to local config export", e)
+            exportConfigToLocalFile(mode)
+        } catch (t: Throwable) {
+            pendingTreeExport = null
+            AppLog.w("Settings", "open config export picker failed; fallback to local export", t)
+            exportConfigToLocalFile(mode)
+        }
+    }
+
+    private fun exportConfigToTreeUri(
+        uri: Uri,
+        mode: AppConfigBackup.ExportMode,
+    ) {
+        configTransferJob =
+            activity.lifecycleScope.launch {
+                val prepared = prepareConfigExport(mode)
+                AppToast.show(activity, exportStartToast(prepared))
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        DocumentExporter.exportToTreeUri(
+                            context = activity,
+                            treeUri = uri,
+                            mimeType = AppConfigBackup.JSON_MIME,
+                            fileName = prepared.fileName,
+                        ) { out ->
+                            out.write(prepared.jsonText.toByteArray(Charsets.UTF_8))
+                        }
+                    }
+                }.onSuccess { result ->
+                    AppToast.showLong(activity, buildConfigExportSuccessText(prepared = prepared, suffix = "已导出：${result.fileName}"))
+                }.onFailure { t ->
+                    AppLog.w("Settings", "export config failed", t)
+                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
+                    AppToast.showLong(activity, "导出失败：$msg")
+                }
+            }
+    }
+
+    private fun exportConfigToLocalFile(mode: AppConfigBackup.ExportMode) {
+        if (configTransferJob?.isActive == true) {
+            AppToast.show(activity, "正在处理配置…")
+            return
+        }
+        configTransferJob =
+            activity.lifecycleScope.launch {
+                val prepared = prepareConfigExport(mode)
+                AppToast.show(activity, "${exportStartToast(prepared)}到本地…")
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        DocumentExporter.exportToLocalFile(
+                            context = activity,
+                            fileName = prepared.fileName,
+                            subDir = "exports",
+                        ) { out ->
+                            out.write(prepared.jsonText.toByteArray(Charsets.UTF_8))
+                        }
+                    }
+                }.onSuccess { result ->
+                    val suffix = "无法选择文件夹，已导出到本地：${result.fileName}\n路径：${result.file.absolutePath}"
+                    AppToast.showLong(activity, buildConfigExportSuccessText(prepared = prepared, suffix = suffix))
+                }.onFailure { t ->
+                    AppLog.w("Settings", "export config (local) failed", t)
+                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
+                    AppToast.showLong(activity, "导出失败：$msg")
+                }
+            }
+    }
+
+    private fun startImportConfig() {
+        if (configTransferJob?.isActive == true) {
+            AppToast.show(activity, "正在处理配置…")
+            return
+        }
+        if (!canOpenDocument()) {
+            AppToast.showLong(activity, "当前设备不支持导入配置")
+            return
+        }
+        try {
+            importConfigLauncher.launch(arrayOf(AppConfigBackup.JSON_MIME, "text/plain", "application/octet-stream"))
+        } catch (e: ActivityNotFoundException) {
+            AppLog.w("Settings", "OpenDocument not supported", e)
+            AppToast.showLong(activity, "当前设备不支持导入配置")
+        } catch (t: Throwable) {
+            AppLog.w("Settings", "open import config picker failed", t)
+            AppToast.showLong(activity, "打开导入文件失败")
+        }
+    }
+
+    private fun importConfigFromUri(uri: Uri) {
+        if (configTransferJob?.isActive == true) {
+            AppToast.show(activity, "正在处理配置…")
+            return
+        }
+        configTransferJob =
+            activity.lifecycleScope.launch {
+                AppToast.show(activity, "正在读取配置…")
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        val text =
+                            activity.contentResolver.openInputStream(uri)?.use { input ->
+                                input.readBytes().toString(Charsets.UTF_8).removePrefix("\uFEFF")
+                            } ?: error("无法读取配置文件")
+                        AppConfigBackup.parse(text)
+                    }
+                }.onSuccess { parsed ->
+                    showImportConfigConfirmDialog(parsed)
+                }.onFailure { t ->
+                    AppLog.w("Settings", "import config read failed", t)
+                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
+                    AppToast.showLong(activity, "读取配置失败：$msg")
+                }
+            }
+    }
+
+    private fun showImportConfigConfirmDialog(parsed: AppConfigBackup.ParsedBackup) {
+        val message =
+            if (parsed.hasCredentials) {
+                "检测到登录凭证。\n导入后将覆盖当前配置和登录状态，并重启应用。"
+            } else {
+                "未检测到登录凭证。\n导入后只覆盖当前配置，保留当前登录状态，并重启应用。"
+            }
+        AppPopup.confirm(
+            context = activity,
+            title = "导入配置",
+            message = message,
+            positiveText = "开始导入",
+            negativeText = "取消",
+            cancelable = true,
+            onPositive = {
+                applyImportedConfig(parsed)
+            },
+        )
+    }
+
+    private fun applyImportedConfig(parsed: AppConfigBackup.ParsedBackup) {
+        if (configTransferJob?.isActive == true) {
+            AppToast.show(activity, "正在处理配置…")
+            return
+        }
+        configTransferJob =
+            activity.lifecycleScope.launch {
+                AppToast.show(activity, if (parsed.hasCredentials) "正在导入配置与登录凭证…" else "正在导入配置…")
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        AppConfigBackup.apply(parsed, prefs = BiliClient.prefs, cookies = BiliClient.cookies)
+                    }
+                }.onSuccess {
+                    LauncherAliasManager.sync(activity.applicationContext, BiliClient.prefs.themePreset)
+                    evictNetworkConnections()
+                    AppToast.showLong(activity, if (parsed.hasCredentials) "已导入配置与登录凭证，正在重启…" else "已导入配置，正在重启…")
+                    restartToMain()
+                }.onFailure { t ->
+                    AppLog.w("Settings", "apply config failed", t)
+                    val msg = t.message?.takeIf { it.isNotBlank() } ?: "未知错误"
+                    AppToast.showLong(activity, "导入失败：$msg")
+                }
+            }
+    }
+
+    private fun prepareConfigExport(mode: AppConfigBackup.ExportMode): PreparedConfigExport {
+        val nowMs = System.currentTimeMillis()
+        val hasCredentials = mode == AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS &&
+            (BiliClient.cookies.hasSessData() || !BiliClient.prefs.webRefreshToken.isNullOrBlank())
+        val effectiveMode = if (hasCredentials) AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS else AppConfigBackup.ExportMode.CONFIG_ONLY
+        return PreparedConfigExport(
+            requestedMode = mode,
+            effectiveMode = effectiveMode,
+            fileName = AppConfigBackup.buildFileName(mode = effectiveMode, nowMs = nowMs),
+            jsonText = AppConfigBackup.buildJson(prefs = BiliClient.prefs, cookies = BiliClient.cookies, mode = effectiveMode, nowMs = nowMs),
+            hasCredentials = hasCredentials,
+        )
+    }
+
+    private fun exportStartToast(prepared: PreparedConfigExport): String {
+        return if (prepared.effectiveMode == AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS) {
+            "正在导出配置与登录凭证…"
+        } else {
+            "正在导出配置…"
+        }
+    }
+
+    private fun buildConfigExportSuccessText(
+        prepared: PreparedConfigExport,
+        suffix: String,
+    ): String {
+        return if (
+            prepared.requestedMode == AppConfigBackup.ExportMode.CONFIG_WITH_CREDENTIALS &&
+            !prepared.hasCredentials
+        ) {
+            "当前未检测到登录凭证，已按纯配置导出。\n$suffix"
+        } else {
+            suffix
+        }
     }
 
     private fun showUploadLogsDialog() {
@@ -472,6 +751,11 @@ class SettingsInteractionHandler(
         return intent.resolveActivity(activity.packageManager) != null
     }
 
+    private fun canOpenDocument(): Boolean {
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).setType("*/*")
+        return intent.resolveActivity(activity.packageManager) != null
+    }
+
     fun onEntryClicked(entry: SettingEntry) {
         val prefs = BiliClient.prefs
         state.pendingRestoreRightId = entry.id
@@ -511,7 +795,7 @@ class SettingsInteractionHandler(
                     prefs.themePreset = key
                     LauncherAliasManager.sync(activity.applicationContext, key)
                     AppToast.show(activity, "主题：$selected（已应用）")
-                    restartToMainForThemePreset()
+                    restartToMain()
                 }
             }
 
@@ -519,25 +803,27 @@ class SettingsInteractionHandler(
             SettingId.Ipv4OnlyEnabled -> {
                 prefs.ipv4OnlyEnabled = !prefs.ipv4OnlyEnabled
                 AppToast.show(activity, "是否只允许使用IPV4：${if (prefs.ipv4OnlyEnabled) "开" else "关"}")
-                runCatching { BiliClient.apiOkHttp.connectionPool.evictAll() }
-                runCatching { BiliClient.cdnOkHttp.connectionPool.evictAll() }
-                runCatching { ApkUpdater.evictConnections() }
+                evictNetworkConnections()
                 renderer.refreshSection(entry.id)
             }
             SettingId.GaiaVgate -> showGaiaVgateDialog(state.currentSectionIndex, entry.id)
             SettingId.ClearCache -> showClearCacheDialog(state.currentSectionIndex, entry.id)
+            SettingId.ConfigTransfer -> showConfigTransferDialog()
             SettingId.ClearLogin -> showClearLoginDialog(state.currentSectionIndex, entry.id)
             SettingId.ExportLogs -> {
                 if (!canOpenDocumentTree()) {
                     exportLogsToLocalFile()
                     return
                 }
+                pendingTreeExport = PendingTreeExport.Logs
                 try {
-                    exportLogsLauncher.launch(null)
+                    exportTreeLauncher.launch(null)
                 } catch (e: ActivityNotFoundException) {
+                    pendingTreeExport = null
                     AppLog.w("Settings", "OpenDocumentTree not supported; fallback to local export", e)
                     exportLogsToLocalFile()
                 } catch (t: Throwable) {
+                    pendingTreeExport = null
                     AppLog.w("Settings", "open export logs picker failed; fallback to local export", t)
                     exportLogsToLocalFile()
                 }
@@ -1231,11 +1517,17 @@ class SettingsInteractionHandler(
         }
     }
 
-    private fun restartToMainForThemePreset() {
+    private fun restartToMain() {
         val intent =
             Intent(activity, MainActivity::class.java)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
         activity.startActivity(intent)
+    }
+
+    private fun evictNetworkConnections() {
+        runCatching { BiliClient.apiOkHttp.connectionPool.evictAll() }
+        runCatching { BiliClient.cdnOkHttp.connectionPool.evictAll() }
+        runCatching { ApkUpdater.evictConnections() }
     }
 
     private fun showChoiceDialog(title: String, items: List<String>, current: String, onPicked: (String) -> Unit) {
@@ -1675,12 +1967,7 @@ class SettingsInteractionHandler(
             negativeText = "取消",
             cancelable = true,
             onPositive = {
-                BiliClient.cookies.clearAll()
-                BiliClient.prefs.webRefreshToken = null
-                BiliClient.prefs.webCookieRefreshCheckedEpochDay = -1L
-                BiliClient.prefs.biliTicketCheckedEpochDay = -1L
-                BiliClient.prefs.gaiaVgateVVoucher = null
-                BiliClient.prefs.gaiaVgateVVoucherSavedAtMs = -1L
+                BiliClient.clearLoginSession()
                 AppToast.show(activity, "已清除 Cookie")
                 renderer.showSection(sectionIndex, focusId = focusId)
             },

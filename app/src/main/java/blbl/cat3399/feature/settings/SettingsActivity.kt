@@ -1,5 +1,6 @@
 package blbl.cat3399.feature.settings
 
+import android.net.Uri
 import android.os.Bundle
 import android.view.KeyEvent
 import androidx.activity.result.contract.ActivityResultContracts
@@ -26,10 +27,16 @@ class SettingsActivity : BaseActivity() {
             interactionHandler.onGaiaVgateResult(result)
         }
 
-    private val exportLogsLauncher =
+    private val exportTreeLauncher =
         registerForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
             if (!this::interactionHandler.isInitialized) return@registerForActivityResult
-            interactionHandler.onExportLogsSelected(uri)
+            interactionHandler.onExportTreeSelected(uri)
+        }
+
+    private val importConfigLauncher =
+        registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
+            if (!this::interactionHandler.isInitialized) return@registerForActivityResult
+            interactionHandler.onImportConfigSelected(uri)
         }
 
     private val sections =
@@ -55,7 +62,8 @@ class SettingsActivity : BaseActivity() {
                 activity = this,
                 state = state,
                 gaiaVgateLauncher = gaiaVgateLauncher,
-                exportLogsLauncher = exportLogsLauncher,
+                exportTreeLauncher = exportTreeLauncher,
+                importConfigLauncher = importConfigLauncher,
             )
 
         binding.btnBack.setOnClickListener { finish() }

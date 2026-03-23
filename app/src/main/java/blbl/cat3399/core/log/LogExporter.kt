@@ -2,11 +2,10 @@ package blbl.cat3399.core.log
 
 import android.content.Context
 import android.net.Uri
-import android.provider.DocumentsContract
+import blbl.cat3399.core.io.DocumentExporter
 import java.io.BufferedOutputStream
 import java.io.File
 import java.io.FileInputStream
-import java.io.FileOutputStream
 import java.io.IOException
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -60,15 +59,19 @@ object LogExporter {
         }
 
         val fileName = resolveExportFileName(nowMs = nowMs, fileNameOverride = fileNameOverride)
-        val outUri = createZipDocument(appContext, treeUri, fileName)
-        val included: Int =
-            appContext.contentResolver.openOutputStream(outUri, "w")?.use { rawOut ->
-                ZipOutputStream(BufferedOutputStream(rawOut, 32 * 1024)).use { zip ->
+        val result =
+            DocumentExporter.exportToTreeUri(
+                context = appContext,
+                treeUri = treeUri,
+                mimeType = ZIP_MIME,
+                fileName = fileName,
+            ) { out ->
+                ZipOutputStream(out).use { zip ->
                     writeZip(zip = zip, extras = extras, logFiles = logFiles, crashFile = crashFile)
                 }
-            } ?: throw IOException("无法写入导出文件")
+            }
 
-        return ExportResult(fileName = fileName, uri = outUri, includedFiles = included)
+        return ExportResult(fileName = result.fileName, uri = result.uri, includedFiles = result.value)
     }
 
     fun exportToLocalFile(
@@ -92,21 +95,19 @@ object LogExporter {
             throw IOException("没有可导出的日志文件")
         }
 
-        val exportDir =
-            appContext.getExternalFilesDir("exports")
-                ?: File(appContext.filesDir, "exports")
-        runCatching { exportDir.mkdirs() }
-
         val fileName = resolveExportFileName(nowMs = nowMs, fileNameOverride = fileNameOverride)
-        val outFile = createLocalZipFile(exportDir, fileName)
-        val included: Int =
-            FileOutputStream(outFile).use { rawOut ->
-                ZipOutputStream(BufferedOutputStream(rawOut, 32 * 1024)).use { zip ->
+        val result =
+            DocumentExporter.exportToLocalFile(
+                context = appContext,
+                fileName = fileName,
+                subDir = "exports",
+            ) { out ->
+                ZipOutputStream(out).use { zip ->
                     writeZip(zip = zip, extras = extras, logFiles = logFiles, crashFile = crashFile)
                 }
             }
 
-        return LocalExportResult(fileName = fileName, file = outFile, includedFiles = included)
+        return LocalExportResult(fileName = result.fileName, file = result.file, includedFiles = result.value)
     }
 
     private fun buildExportFileName(nowMs: Long): String {
@@ -177,39 +178,5 @@ object LogExporter {
         if (p.contains("/../")) return null
         if (p.contains('\u0000')) return null
         return p.take(256)
-    }
-
-    private fun createZipDocument(context: Context, treeUri: Uri, baseName: String): Uri {
-        val resolver = context.contentResolver
-        val treeDocId = DocumentsContract.getTreeDocumentId(treeUri)
-        val dirUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocId)
-
-        var attempt = 0
-        while (attempt <= 20) {
-            val name = if (attempt == 0) baseName else baseName.removeSuffix(".zip") + "_$attempt.zip"
-            try {
-                val created = DocumentsContract.createDocument(resolver, dirUri, ZIP_MIME, name)
-                if (created != null) return created
-            } catch (_: Throwable) {
-                // Try a different name.
-            }
-            attempt++
-        }
-        throw IOException("创建导出文件失败")
-    }
-
-    private fun createLocalZipFile(dir: File, baseName: String): File {
-        var attempt = 0
-        while (attempt <= 20) {
-            val name = if (attempt == 0) baseName else baseName.removeSuffix(".zip") + "_$attempt.zip"
-            val file = File(dir, name)
-            try {
-                if (file.createNewFile()) return file
-            } catch (_: Throwable) {
-                // Try a different name.
-            }
-            attempt++
-        }
-        throw IOException("创建导出文件失败")
     }
 }

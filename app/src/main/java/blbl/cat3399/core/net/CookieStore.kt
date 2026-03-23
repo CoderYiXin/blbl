@@ -99,11 +99,42 @@ class CookieStore(
         prefs.edit().clear().apply()
     }
 
+    fun exportSnapshotJson(includeExpired: Boolean = false): JSONObject {
+        return buildJsonRoot(includeExpired = includeExpired)
+    }
+
+    fun replaceAllFromJson(root: JSONObject) {
+        val parsed = parseJsonRoot(root)
+        store.clear()
+        store.putAll(parsed)
+        persistToDisk()
+    }
+
     private fun persistToDisk() {
+        prefs.edit().putString("cookies", buildJsonRoot(includeExpired = true).toString()).apply()
+    }
+
+    private fun loadFromDisk() {
+        val raw = prefs.getString("cookies", null) ?: return
+        runCatching {
+            val root = JSONObject(raw)
+            store.clear()
+            store.putAll(parseJsonRoot(root))
+            AppLog.i("CookieStore", "loadFromDisk hosts=${store.size}")
+        }.onFailure {
+            AppLog.w("CookieStore", "loadFromDisk failed; clearing", it)
+            store.clear()
+            prefs.edit().clear().apply()
+        }
+    }
+
+    private fun buildJsonRoot(includeExpired: Boolean): JSONObject {
+        val now = System.currentTimeMillis()
         val root = JSONObject()
         for ((host, cookies) in store.entries) {
             val arr = JSONArray()
             cookies.forEach { cookie ->
+                if (!includeExpired && cookie.expiresAt < now) return@forEach
                 val obj = JSONObject()
                 obj.put("name", cookie.name)
                 obj.put("value", cookie.value)
@@ -116,42 +147,35 @@ class CookieStore(
                 obj.put("persistent", cookie.persistent)
                 arr.put(obj)
             }
-            root.put(host, arr)
+            if (arr.length() > 0) root.put(host, arr)
         }
-        prefs.edit().putString("cookies", root.toString()).apply()
+        return root
     }
 
-    private fun loadFromDisk() {
-        val raw = prefs.getString("cookies", null) ?: return
-        runCatching {
-            val root = JSONObject(raw)
-            val it = root.keys()
-            while (it.hasNext()) {
-                val domain = it.next()
-                val arr = root.optJSONArray(domain) ?: continue
-                val list = mutableListOf<Cookie>()
-                for (i in 0 until arr.length()) {
-                    val obj = arr.optJSONObject(i) ?: continue
-                    val builder = Cookie.Builder()
-                        .name(obj.getString("name"))
-                        .value(obj.getString("value"))
-                        .path(obj.optString("path", "/"))
+    private fun parseJsonRoot(root: JSONObject): ConcurrentHashMap<String, MutableList<Cookie>> {
+        val parsed = ConcurrentHashMap<String, MutableList<Cookie>>()
+        val it = root.keys()
+        while (it.hasNext()) {
+            val domain = it.next()
+            val arr = root.optJSONArray(domain) ?: continue
+            val list = mutableListOf<Cookie>()
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                val builder = Cookie.Builder()
+                    .name(obj.getString("name"))
+                    .value(obj.getString("value"))
+                    .path(obj.optString("path", "/"))
 
-                    val cookieDomain = obj.optString("domain", domain)
-                    if (obj.optBoolean("hostOnly", false)) builder.hostOnlyDomain(cookieDomain) else builder.domain(cookieDomain)
-                    if (obj.optBoolean("secure", false)) builder.secure()
-                    if (obj.optBoolean("httpOnly", false)) builder.httpOnly()
-                    val expiresAt = obj.optLong("expiresAt", 0L)
-                    if (expiresAt > 0L) builder.expiresAt(expiresAt)
-                    list.add(builder.build())
-                }
-                store[domain] = list
+                val cookieDomain = obj.optString("domain", domain)
+                if (obj.optBoolean("hostOnly", false)) builder.hostOnlyDomain(cookieDomain) else builder.domain(cookieDomain)
+                if (obj.optBoolean("secure", false)) builder.secure()
+                if (obj.optBoolean("httpOnly", false)) builder.httpOnly()
+                val expiresAt = obj.optLong("expiresAt", 0L)
+                if (expiresAt > 0L) builder.expiresAt(expiresAt)
+                list.add(builder.build())
             }
-            AppLog.i("CookieStore", "loadFromDisk hosts=${store.size}")
-        }.onFailure {
-            AppLog.w("CookieStore", "loadFromDisk failed; clearing", it)
-            store.clear()
-            prefs.edit().clear().apply()
+            if (list.isNotEmpty()) parsed[domain] = list
         }
+        return parsed
     }
 }

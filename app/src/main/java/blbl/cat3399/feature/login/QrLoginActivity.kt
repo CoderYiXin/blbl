@@ -60,7 +60,7 @@ class QrLoginActivity : BaseActivity() {
 
         binding.btnRefresh.setOnClickListener { startFlow() }
         binding.btnClear.setOnClickListener {
-            BiliClient.cookies.clearAll()
+            BiliClient.clearLoginSession()
             binding.tvStatus.text = "已清除 Cookie（SESSDATA 等）"
             binding.tvDebug.text = "cookie cleared"
         }

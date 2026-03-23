@@ -548,10 +548,7 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
             positiveText = "确定退出",
             negativeText = "取消",
             onPositive = {
-                BiliClient.cookies.clearAll()
-                BiliClient.prefs.webRefreshToken = null
-                BiliClient.prefs.webCookieRefreshCheckedEpochDay = -1L
-                BiliClient.prefs.biliTicketCheckedEpochDay = -1L
+                BiliClient.clearLoginSession()
                 AppToast.show(this, "已退出登录")
                 hideUserInfoOverlay()
                 refreshSidebarUser()
