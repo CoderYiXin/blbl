@@ -25,6 +25,7 @@ import blbl.cat3399.core.ui.enableDpadTabFocus
 import blbl.cat3399.core.ui.hideImeReliable
 import blbl.cat3399.core.ui.popup.AppPopup
 import blbl.cat3399.core.ui.postIfAlive
+import blbl.cat3399.core.ui.requestFocusAdapterPositionReliable
 import blbl.cat3399.core.ui.requestFocusFirstItemOrSelfAfterRefresh
 import blbl.cat3399.core.ui.showImeReliable
 import blbl.cat3399.core.ui.uiScaler
@@ -615,14 +616,14 @@ class SearchRenderer(
 
         applyUiScale()
         (binding.recyclerResults.layoutManager as? GridLayoutManager)?.spanCount = spanCountForCurrentTab()
-        maybeConsumePendingFocusFirstResultCardFromTabSwitch()
+        maybeConsumePendingResultFocus()
         restoreMediaFocusIfNeeded()
     }
 
     fun onShown() {
         // When SearchFragment is hidden via FragmentTransaction.hide(), it stays resumed.
         // Popping the detail fragment makes it visible again without triggering onResume().
-        maybeConsumePendingFocusFirstResultCardFromTabSwitch()
+        maybeConsumePendingResultFocus()
         restoreMediaFocusIfNeeded()
     }
 
@@ -664,7 +665,7 @@ class SearchRenderer(
     fun onResultsApplied() {
         binding.recyclerResults.postIfAlive(isAlive = { !released }) {
             if (maybeConsumePendingFocusFirstResultCardAfterRefresh()) return@postIfAlive
-            maybeConsumePendingFocusFirstResultCardFromTabSwitch()
+            maybeConsumePendingResultFocus()
             resultsGridController?.consumePendingFocusAfterLoadMore()
         }
     }
@@ -739,20 +740,18 @@ class SearchRenderer(
 
     private fun focusFirstResultCardFromTab(): Boolean {
         if (!isResultsVisible()) return false
-        state.pendingFocusFirstResultCardFromTabSwitch = true
+        state.pendingFocusFirstResultCardFromTab = true
+        state.pendingFocusResultCardFromContentSwitch = false
         if (!fragment.isResumed) return true
-        return maybeConsumePendingFocusFirstResultCardFromTabSwitch()
+        return maybeConsumePendingResultFocus()
     }
 
-    private fun requestFocusResultsContentFromTabSwitch(): Boolean {
+    private fun requestFocusResultsContentFromContentSwitch(): Boolean {
         if (!isResultsVisible()) return false
-        return requestFocusFirstResultCardFromTabSwitch()
-    }
-
-    private fun requestFocusFirstResultCardFromTabSwitch(): Boolean {
-        state.pendingFocusFirstResultCardFromTabSwitch = true
+        state.pendingFocusResultCardFromContentSwitch = true
+        state.pendingFocusFirstResultCardFromTab = false
         if (!fragment.isResumed) return true
-        return maybeConsumePendingFocusFirstResultCardFromTabSwitch()
+        return maybeConsumePendingResultFocus()
     }
 
     private fun maybeConsumePendingFocusFirstResultCardAfterRefresh(): Boolean {
@@ -764,7 +763,7 @@ class SearchRenderer(
         }
 
         // Refresh always focuses the first result card; don't let tab-switch focus flags interfere.
-        state.pendingFocusFirstResultCardFromTabSwitch = false
+        state.clearPendingResultFocusRequests()
 
         val recycler = binding.recyclerResults
         val isUiAlive = { !released && fragment.isAdded && fragment.isResumed && isResultsVisible() }
@@ -773,24 +772,32 @@ class SearchRenderer(
             itemCount = itemCount,
             smoothScroll = false,
             isAlive = isUiAlive,
-            onDone = { state.pendingFocusFirstResultCardAfterRefresh = false },
+            onDone = { focusedFirstItem ->
+                state.pendingFocusFirstResultCardAfterRefresh = false
+                if (focusedFirstItem) state.rememberFocusedResultPosition(state.currentTabIndex, 0)
+            },
         )
         return true
     }
 
-    private fun maybeConsumePendingFocusFirstResultCardFromTabSwitch(): Boolean {
-        if (!state.pendingFocusFirstResultCardFromTabSwitch) return false
+    private fun maybeConsumePendingResultFocus(): Boolean {
+        if (!state.hasPendingResultFocusRequest()) return false
         if (!fragment.isAdded || !fragment.isResumed) return false
         if (!isResultsVisible()) {
-            state.pendingFocusFirstResultCardFromTabSwitch = false
+            state.clearPendingResultFocusRequests()
             return false
         }
 
         val focused = fragment.activity?.currentFocus
-        if (focused != null && FocusTreeUtils.isDescendantOf(focused, binding.recyclerResults) && focused != binding.recyclerResults) {
-            state.pendingFocusFirstResultCardFromTabSwitch = false
-            return false
+        val focusInRecycler = focused != null && FocusTreeUtils.isDescendantOf(focused, binding.recyclerResults)
+        val focusInTab = focused != null && FocusTreeUtils.isDescendantOf(focused, binding.tabLayout)
+
+        if (state.pendingFocusFirstResultCardFromTab) {
+            if (!focusInTab && !focusInRecycler) {
+                state.pendingFocusFirstResultCardFromTab = false
+            }
         }
+        if (!state.hasPendingResultFocusRequest()) return false
 
         val adapter = binding.recyclerResults.adapter
         if (adapter == null || adapter.itemCount <= 0) {
@@ -800,20 +807,33 @@ class SearchRenderer(
 
         val recycler = binding.recyclerResults
         val isUiAlive = { !released && fragment.isAdded && fragment.isResumed }
-        recycler.postIfAlive(isAlive = isUiAlive) {
-            val vh = recycler.findViewHolderForAdapterPosition(0)
-            if (vh != null) {
-                vh.itemView.requestFocus()
-                state.pendingFocusFirstResultCardFromTabSwitch = false
-                return@postIfAlive
-            }
-            recycler.scrollToPosition(0)
-            recycler.postIfAlive(isAlive = isUiAlive) {
-                recycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() ?: recycler.requestFocus()
-                state.pendingFocusFirstResultCardFromTabSwitch = false
+        val targetPosition = resolvePendingResultFocusTarget(itemCount = adapter.itemCount)
+        if (focusInRecycler && focused != null && focused != recycler) {
+            val holder = recycler.findContainingViewHolder(focused)
+            val currentPosition = holder?.bindingAdapterPosition?.takeIf { it != RecyclerView.NO_POSITION }
+            if (!state.pendingFocusResultCardFromContentSwitch || currentPosition == targetPosition) {
+                currentPosition?.let { state.rememberFocusedResultPosition(state.currentTabIndex, it) }
+                state.clearPendingResultFocusRequests()
+                return false
             }
         }
+        recycler.requestFocusAdapterPositionReliable(
+            position = targetPosition,
+            smoothScroll = false,
+            isAlive = isUiAlive,
+            onFocused = {
+                state.rememberFocusedResultPosition(state.currentTabIndex, targetPosition)
+                state.clearPendingResultFocusRequests()
+            },
+        )
         return true
+    }
+
+    private fun resolvePendingResultFocusTarget(itemCount: Int): Int {
+        if (state.pendingFocusFirstResultCardFromTab) return 0
+        if (!state.pendingFocusResultCardFromContentSwitch) return 0
+        val saved = state.focusedResultPositionForTab(state.currentTabIndex) ?: return 0
+        return saved.coerceIn(0, itemCount - 1)
     }
 
     private fun switchToNextTabFromContentEdge(): Boolean {
@@ -823,10 +843,11 @@ class SearchRenderer(
         val cur = binding.tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: 0
         val next = cur + 1
         if (next >= binding.tabLayout.tabCount) return false
+        captureCurrentFocusedResultPosition()
         binding.tabLayout.getTabAt(next)?.select() ?: return false
         val tabLayout = binding.tabLayout
         tabLayout.postIfAlive(isAlive = { !released }) {
-            requestFocusResultsContentFromTabSwitch() || (tabStrip.getChildAt(next)?.requestFocus() == true)
+            requestFocusResultsContentFromContentSwitch() || (tabStrip.getChildAt(next)?.requestFocus() == true)
         }
         return true
     }
@@ -838,12 +859,29 @@ class SearchRenderer(
         val cur = binding.tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: 0
         val prev = cur - 1
         if (prev < 0) return false
+        captureCurrentFocusedResultPosition()
         binding.tabLayout.getTabAt(prev)?.select() ?: return false
         val tabLayout = binding.tabLayout
         tabLayout.postIfAlive(isAlive = { !released }) {
-            requestFocusResultsContentFromTabSwitch() || (tabStrip.getChildAt(prev)?.requestFocus() == true)
+            requestFocusResultsContentFromContentSwitch() || (tabStrip.getChildAt(prev)?.requestFocus() == true)
         }
         return true
+    }
+
+    private fun captureCurrentFocusedResultPosition() {
+        val focused = fragment.activity?.currentFocus ?: return
+        rememberFocusedResultPositionFromView(focused)
+    }
+
+    private fun rememberFocusedResultPositionFromView(
+        focusedView: View,
+        recycler: RecyclerView = binding.recyclerResults,
+        tabIndex: Int = state.currentTabIndex,
+    ) {
+        val holder = recycler.findContainingViewHolder(focusedView) ?: return
+        val position = holder.bindingAdapterPosition
+        if (position == RecyclerView.NO_POSITION) return
+        state.rememberFocusedResultPosition(tabIndex, position)
     }
 
     private fun focusKeyAt(pos: Int): Boolean {
@@ -899,7 +937,7 @@ class SearchRenderer(
         if (!isResultsVisible()) return
         binding.recyclerResults.adapter = adapterForTab(pos)
         (binding.recyclerResults.layoutManager as? GridLayoutManager)?.spanCount = spanCountForTab(pos)
-        binding.recyclerResults.scrollToPosition(0)
+        scrollResultsToRememberedPosition(pos)
         updateSortUi()
 
         binding.tvResultsPlaceholder.visibility = View.GONE
@@ -991,15 +1029,30 @@ class SearchRenderer(
         recycler.postIfAlive(isAlive = { !released }) {
             val focusedNow = recycler.findViewHolderForAdapterPosition(safePos)?.itemView?.requestFocus() == true
             if (focusedNow) {
+                state.rememberFocusedResultPosition(state.currentTabIndex, safePos)
                 state.pendingRestoreMediaPos = null
                 return@postIfAlive
             }
             recycler.scrollToPosition(safePos)
             recycler.postIfAlive(isAlive = { !released }) {
                 val focusedAfterScroll = recycler.findViewHolderForAdapterPosition(safePos)?.itemView?.requestFocus() == true
-                if (focusedAfterScroll) state.pendingRestoreMediaPos = null
+                if (focusedAfterScroll) {
+                    state.rememberFocusedResultPosition(state.currentTabIndex, safePos)
+                    state.pendingRestoreMediaPos = null
+                }
             }
         }
+    }
+
+    private fun scrollResultsToRememberedPosition(tabIndex: Int) {
+        val adapter = binding.recyclerResults.adapter ?: return
+        val itemCount = adapter.itemCount
+        val target =
+            when {
+                itemCount <= 0 -> 0
+                else -> (state.focusedResultPositionForTab(tabIndex) ?: 0).coerceIn(0, itemCount - 1)
+            }
+        binding.recyclerResults.scrollToPosition(target)
     }
 
     fun applyUiScale() {
