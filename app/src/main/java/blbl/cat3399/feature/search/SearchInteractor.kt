@@ -124,6 +124,8 @@ class SearchInteractor(
 
         // New keyword: drop per-tab "memory" so switching tabs will refresh on-demand.
         state.clearAllTabMemories()
+        state.clearAllFocusedResultPositions()
+        state.clearPendingResultFocusRequests()
         for (i in SearchTab.entries.indices) {
             state.clearLoadedForTab(i)
             state.pagingForTab(i).reset()
@@ -219,10 +221,12 @@ class SearchInteractor(
     fun resetAndLoad() {
         if (!renderer.isResultsVisible()) return
         state.pendingFocusFirstResultCardAfterRefresh = true
+        state.clearPendingResultFocusRequests()
         renderer.parkResultsFocusForDataSetReset()
         val tabIndex = state.currentTabIndex
 
         state.clearLoadedForTab(tabIndex)
+        state.clearFocusedResultPositionForTab(tabIndex)
         renderer.clearResultsForTab(tabIndex)
 
         state.pagingForTab(tabIndex).reset()

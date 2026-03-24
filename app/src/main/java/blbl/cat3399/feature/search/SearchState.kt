@@ -20,13 +20,15 @@ class SearchState {
     var currentLiveOrder: LiveOrder = LiveOrder.Online
     var currentUserOrder: UserOrder = UserOrder.Default
 
-    var pendingFocusFirstResultCardFromTabSwitch: Boolean = false
+    var pendingFocusFirstResultCardFromTab: Boolean = false
+    var pendingFocusResultCardFromContentSwitch: Boolean = false
     var pendingFocusFirstResultCardAfterRefresh: Boolean = false
     var pendingRestoreMediaPos: Int? = null
 
     var refreshUiToken: Int = 0
 
     private val tabHasMemory: BooleanArray = BooleanArray(SearchTab.entries.size)
+    private val lastFocusedResultPositions: IntArray = IntArray(SearchTab.entries.size) { -1 }
 
     val loadedBvids: HashSet<String> = HashSet()
     val loadedBangumiSeasonIds: HashSet<Long> = HashSet()
@@ -62,6 +64,35 @@ class SearchState {
 
     fun clearAllTabMemories() {
         tabHasMemory.fill(false)
+    }
+
+    fun focusedResultPositionForTab(index: Int): Int? {
+        if (index !in lastFocusedResultPositions.indices) return null
+        val pos = lastFocusedResultPositions[index]
+        return pos.takeIf { it >= 0 }
+    }
+
+    fun rememberFocusedResultPosition(index: Int, position: Int) {
+        if (index !in lastFocusedResultPositions.indices) return
+        lastFocusedResultPositions[index] = position.coerceAtLeast(0)
+    }
+
+    fun clearFocusedResultPositionForTab(index: Int) {
+        if (index !in lastFocusedResultPositions.indices) return
+        lastFocusedResultPositions[index] = -1
+    }
+
+    fun clearAllFocusedResultPositions() {
+        lastFocusedResultPositions.fill(-1)
+    }
+
+    fun hasPendingResultFocusRequest(): Boolean {
+        return pendingFocusFirstResultCardFromTab || pendingFocusResultCardFromContentSwitch
+    }
+
+    fun clearPendingResultFocusRequests() {
+        pendingFocusFirstResultCardFromTab = false
+        pendingFocusResultCardFromContentSwitch = false
     }
 
     fun clearLoadedForTab(index: Int) {
