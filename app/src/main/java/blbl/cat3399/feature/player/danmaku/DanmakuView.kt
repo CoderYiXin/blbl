@@ -6,9 +6,6 @@ import android.os.SystemClock
 import android.util.AttributeSet
 import android.util.TypedValue
 import android.view.View
-import android.view.ViewTreeObserver
-import androidx.core.view.ViewCompat
-import androidx.core.view.WindowInsetsCompat
 import blbl.cat3399.core.emote.ReplyEmotePanelRepository
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.model.Danmaku
@@ -37,10 +34,9 @@ class DanmakuView @JvmOverloads constructor(
     @Volatile private var invalidateTopPx: Int = 0
     @Volatile private var invalidateBottomPx: Int = 0
 
-    private var cachedTopInsetPx: Int = dp(2f)
-    private var cachedBottomInsetPx: Int = dp(52f)
-    private var insetsDirty: Boolean = true
-    private val insetsListener = ViewTreeObserver.OnGlobalLayoutListener { insetsDirty = true }
+    // Keep danmaku anchored to the video edge; window insets made the first lane drift on 16:9 TVs.
+    private val viewportTopInsetPx: Int = dp(2f)
+    private val viewportBottomInsetPx: Int = dp(52f)
 
     private var lastViewportW: Int = 0
     private var lastViewportH: Int = 0
@@ -193,8 +189,6 @@ class DanmakuView @JvmOverloads constructor(
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
-        viewTreeObserver.addOnGlobalLayoutListener(insetsListener)
-        insetsDirty = true
         ReplyEmotePanelRepository.warmup(context)
         updateViewportIfNeeded()
         startPerfLoggingIfNeeded()
@@ -202,7 +196,6 @@ class DanmakuView @JvmOverloads constructor(
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
-        runCatching { viewTreeObserver.removeOnGlobalLayoutListener(insetsListener) }
         stopPerfLogging()
         player.release()
         debugStats.reset()
@@ -210,7 +203,6 @@ class DanmakuView @JvmOverloads constructor(
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        insetsDirty = true
         updateViewportIfNeeded()
     }
 
@@ -373,8 +365,8 @@ class DanmakuView @JvmOverloads constructor(
             invalidateBottomPx = 0
             return
         }
-        val topInsetPx = safeTopInsetPx()
-        val bottomInsetPx = safeBottomInsetPx()
+        val topInsetPx = viewportTopInsetPx
+        val bottomInsetPx = viewportBottomInsetPx
         val safeTop = topInsetPx.coerceIn(0, h)
         val safeBottom = bottomInsetPx.coerceIn(0, h - safeTop)
         val availableHeight = (h - safeTop - safeBottom).coerceAtLeast(0)
@@ -389,38 +381,14 @@ class DanmakuView @JvmOverloads constructor(
     private fun updateViewportIfNeeded() {
         val w = width.coerceAtLeast(0)
         val h = height.coerceAtLeast(0)
-        val top = safeTopInsetPx()
-        val bottom = safeBottomInsetPx()
+        val top = viewportTopInsetPx
+        val bottom = viewportBottomInsetPx
         if (w == lastViewportW && h == lastViewportH && top == lastViewportTopInset && bottom == lastViewportBottomInset) return
         lastViewportW = w
         lastViewportH = h
         lastViewportTopInset = top
         lastViewportBottomInset = bottom
         player.onViewportChanged(width = w, height = h, topInsetPx = top, bottomInsetPx = bottom)
-    }
-
-    private fun safeTopInsetPx(): Int {
-        if (insetsDirty) updateCachedInsets()
-        return cachedTopInsetPx
-    }
-
-    private fun safeBottomInsetPx(): Int {
-        if (insetsDirty) updateCachedInsets()
-        return cachedBottomInsetPx
-    }
-
-    private fun updateCachedInsets() {
-        val insetTop =
-            ViewCompat.getRootWindowInsets(this)
-                ?.getInsets(WindowInsetsCompat.Type.systemBars())
-                ?.top
-                ?: runCatching {
-                    val id = resources.getIdentifier("status_bar_height", "dimen", "android")
-                    if (id > 0) resources.getDimensionPixelSize(id) else 0
-                }.getOrDefault(0)
-        cachedTopInsetPx = insetTop + dp(2f)
-        cachedBottomInsetPx = dp(52f)
-        insetsDirty = false
     }
 
     private fun dp(v: Float): Int = TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, v, resources.displayMetrics).toInt()
