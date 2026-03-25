@@ -12,6 +12,7 @@ import androidx.recyclerview.widget.RecyclerView
 import blbl.cat3399.R
 import blbl.cat3399.core.emote.EmoteSpannable
 import blbl.cat3399.core.image.ImageLoader
+import blbl.cat3399.core.image.ImageUrl
 import blbl.cat3399.core.note.NoteImageRepository
 import blbl.cat3399.core.ui.cloneInUserScale
 import blbl.cat3399.core.util.Format
@@ -252,7 +253,7 @@ class PlayerCommentsAdapter(
 
             if (v1 != null) {
                 binding.ivPicture1.visibility = View.VISIBLE
-                ImageLoader.loadInto(binding.ivPicture1, v1)
+                ImageLoader.loadInto(binding.ivPicture1, ImageUrl.commentThumbnail(v1))
             } else {
                 binding.ivPicture1.visibility = View.GONE
                 ImageLoader.loadInto(binding.ivPicture1, null)
@@ -260,7 +261,7 @@ class PlayerCommentsAdapter(
 
             if (v2 != null) {
                 binding.ivPicture2.visibility = View.VISIBLE
-                ImageLoader.loadInto(binding.ivPicture2, v2)
+                ImageLoader.loadInto(binding.ivPicture2, ImageUrl.commentThumbnail(v2))
             } else {
                 binding.ivPicture2.visibility = View.GONE
                 ImageLoader.loadInto(binding.ivPicture2, null)
@@ -268,7 +269,7 @@ class PlayerCommentsAdapter(
 
             if (v3 != null) {
                 binding.ivPicture3.visibility = View.VISIBLE
-                ImageLoader.loadInto(binding.ivPicture3, v3)
+                ImageLoader.loadInto(binding.ivPicture3, ImageUrl.commentThumbnail(v3))
             } else {
                 binding.ivPicture3.visibility = View.GONE
                 ImageLoader.loadInto(binding.ivPicture3, null)

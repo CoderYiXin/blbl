@@ -46,4 +46,17 @@ object ImageUrl {
         if (nu.contains("@")) return nu
         return nu + "@80w_80h_1c.webp"
     }
+
+    fun commentThumbnail(url: String?): String? {
+        val u = url ?: return null
+        if (u.isBlank()) return null
+        val nu = normalize(u)
+        if (nu.contains("@")) return nu
+        val suffix = when (BiliClient.prefs.imageQuality) {
+            "small" -> "@320w_240h_1c.webp"
+            "large" -> "@640w_480h_1c.webp"
+            else -> "@480w_360h_1c.webp"
+        }
+        return nu + suffix
+    }
 }
