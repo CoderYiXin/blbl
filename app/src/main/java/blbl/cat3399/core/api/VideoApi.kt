@@ -1044,32 +1044,12 @@ internal object VideoApi {
 
     suspend fun dmSeg(cid: Long, segmentIndex: Int): List<Danmaku> {
         try {
-            val url =
-                BiliClient.withQuery(
-                    "https://api.bilibili.com/x/v2/dm/web/seg.so",
-                    mapOf(
-                        "type" to "1",
-                        "oid" to cid.toString(),
-                        "segment_index" to segmentIndex.toString(),
-                    ),
-                )
-            val bytes = BiliClient.getBytes(url, headers = BiliApi.piliWebHeaders(targetUrl = url, includeCookie = true), noCookies = true)
-            val reply = DmSegMobileReply.parseFrom(bytes)
-            val list =
-                reply.elemsList.mapNotNull { e ->
-                    val text = e.content ?: return@mapNotNull null
-                    Danmaku(
-                        timeMs = e.progress,
-                        mode = e.mode,
-                        text = text,
-                        color = e.color.toInt(),
-                        fontSize = e.fontsize,
-                        weight = e.weight,
-                        midHash = e.midHash?.trim()?.takeIf { it.isNotBlank() },
-                    )
-                }
-            AppLog.d(TAG, "dmSeg cid=$cid seg=$segmentIndex bytes=${bytes.size} size=${list.size} state=${reply.state}")
-            return list
+            return requestWithAnonymousFallback(
+                requestName = "dmSeg",
+                context = "cid=$cid seg=$segmentIndex",
+                primary = { requestDmSeg(cid = cid, segmentIndex = segmentIndex, includeCookie = true) },
+                fallback = { requestDmSeg(cid = cid, segmentIndex = segmentIndex, includeCookie = false) },
+            )
         } catch (t: Throwable) {
             AppLog.w(TAG, "dmSeg failed cid=$cid seg=$segmentIndex", t)
             throw t
@@ -1077,6 +1057,60 @@ internal object VideoApi {
     }
 
     suspend fun dmWebView(cid: Long, aid: Long? = null): BiliApi.DanmakuWebView {
+        return requestWithAnonymousFallback(
+            requestName = "dmWebView",
+            context = "cid=$cid aid=${aid ?: -1}",
+            primary = { requestDmWebView(cid = cid, aid = aid, includeCookie = true) },
+            fallback = { requestDmWebView(cid = cid, aid = aid, includeCookie = false) },
+        )
+    }
+
+    private suspend fun requestDmSeg(
+        cid: Long,
+        segmentIndex: Int,
+        includeCookie: Boolean,
+    ): List<Danmaku> {
+        val url =
+            BiliClient.withQuery(
+                "https://api.bilibili.com/x/v2/dm/web/seg.so",
+                mapOf(
+                    "type" to "1",
+                    "oid" to cid.toString(),
+                    "segment_index" to segmentIndex.toString(),
+                ),
+            )
+        val bytes =
+            BiliClient.getBytes(
+                url,
+                headers = BiliApi.piliWebHeaders(targetUrl = url, includeCookie = includeCookie),
+                noCookies = true,
+            )
+        val reply = DmSegMobileReply.parseFrom(bytes)
+        val list =
+            reply.elemsList.mapNotNull { e ->
+                val text = e.content ?: return@mapNotNull null
+                Danmaku(
+                    timeMs = e.progress,
+                    mode = e.mode,
+                    text = text,
+                    color = e.color.toInt(),
+                    fontSize = e.fontsize,
+                    weight = e.weight,
+                    midHash = e.midHash?.trim()?.takeIf { it.isNotBlank() },
+                )
+            }
+        AppLog.d(
+            TAG,
+            "dmSeg cid=$cid seg=$segmentIndex includeCookie=$includeCookie bytes=${bytes.size} size=${list.size} state=${reply.state}",
+        )
+        return list
+    }
+
+    private suspend fun requestDmWebView(
+        cid: Long,
+        aid: Long?,
+        includeCookie: Boolean,
+    ): BiliApi.DanmakuWebView {
         val params =
             mutableMapOf(
                 "type" to "1",
@@ -1084,7 +1118,12 @@ internal object VideoApi {
             )
         if (aid != null && aid > 0) params["pid"] = aid.toString()
         val url = BiliClient.withQuery("https://api.bilibili.com/x/v2/dm/web/view", params)
-        val bytes = BiliClient.getBytes(url, headers = BiliApi.piliWebHeaders(targetUrl = url, includeCookie = true), noCookies = true)
+        val bytes =
+            BiliClient.getBytes(
+                url,
+                headers = BiliApi.piliWebHeaders(targetUrl = url, includeCookie = includeCookie),
+                noCookies = true,
+            )
         val reply = DmWebViewReply.parseFrom(bytes)
 
         val seg = reply.dmSge
@@ -1112,7 +1151,10 @@ internal object VideoApi {
             } else {
                 null
             }
-        AppLog.d(TAG, "dmWebView cid=$cid segTotal=$segTotal pageSizeMs=$pageSizeMs hasSetting=${setting != null}")
+        AppLog.d(
+            TAG,
+            "dmWebView cid=$cid aid=${aid ?: -1} includeCookie=$includeCookie bytes=${bytes.size} segTotal=$segTotal pageSizeMs=$pageSizeMs hasSetting=${setting != null}",
+        )
         return BiliApi.DanmakuWebView(
             segmentTotal = segTotal,
             segmentPageSizeMs = pageSizeMs,
@@ -1343,5 +1385,31 @@ internal object VideoApi {
             throw BiliApiException(apiCode = code, apiMessage = msg)
         }
         return json
+    }
+
+    internal suspend fun <T> requestWithAnonymousFallback(
+        requestName: String,
+        context: String,
+        primary: suspend () -> T,
+        fallback: suspend () -> T,
+    ): T {
+        try {
+            return primary()
+        } catch (primaryError: Throwable) {
+            if (primaryError is CancellationException) throw primaryError
+            runCatching { AppLog.w(TAG, "$requestName primary failed, retry anonymous $context", primaryError) }
+            try {
+                return fallback().also {
+                    runCatching { AppLog.i(TAG, "$requestName anonymous fallback succeeded $context") }
+                }
+            } catch (fallbackError: Throwable) {
+                if (fallbackError is CancellationException) throw fallbackError
+                if (fallbackError !== primaryError) {
+                    primaryError.addSuppressed(fallbackError)
+                }
+                runCatching { AppLog.w(TAG, "$requestName anonymous fallback failed $context", fallbackError) }
+                throw primaryError
+            }
+        }
     }
 }
