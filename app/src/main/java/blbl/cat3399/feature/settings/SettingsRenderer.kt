@@ -278,6 +278,12 @@ class SettingsRenderer(
                         null,
                     ),
                     SettingEntry(
+                        SettingId.PlayerTogglePlayStateShowOsd,
+                        "全屏下切换播放状态是否弹出OSD",
+                        if (prefs.playerTogglePlayStateShowOsd) "开" else "关",
+                        null,
+                    ),
+                    SettingEntry(
                         SettingId.PlayerPersistentBottomProgressEnabled,
                         "底部常驻进度条",
                         if (prefs.playerPersistentBottomProgressEnabled) "开" else "关",

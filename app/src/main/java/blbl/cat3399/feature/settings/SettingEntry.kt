@@ -56,6 +56,7 @@ enum class SettingId(
     DynamicFollowingRecentUpdateDotEnabled("dynamic_following_recent_update_dot_enabled"),
     PlayerDoubleBackToExit("player_double_back_to_exit"),
     PlayerDownKeyOsdFocusTarget("player_down_key_osd_focus_target"),
+    PlayerTogglePlayStateShowOsd("player_toggle_play_state_show_osd"),
     PlayerPersistentBottomProgressEnabled("player_persistent_bottom_progress_enabled"),
     PlayerVideoShotPreviewSize("player_videoshot_preview_size"),
 

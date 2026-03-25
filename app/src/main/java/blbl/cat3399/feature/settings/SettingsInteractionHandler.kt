@@ -639,6 +639,7 @@ class SettingsInteractionHandler(
                     .put("debug_enabled", prefs.playerDebugEnabled)
                     .put("double_back_to_exit", prefs.playerDoubleBackToExit)
                     .put("down_key_osd_focus_target", prefs.playerDownKeyOsdFocusTarget)
+                    .put("toggle_play_state_show_osd", prefs.playerTogglePlayStateShowOsd)
                     .put("persistent_bottom_progress_enabled", prefs.playerPersistentBottomProgressEnabled)
                     .put("playback_mode", prefs.playerPlaybackMode)
                     .put("osd_buttons", osdButtons),
@@ -1399,6 +1400,11 @@ class SettingsInteractionHandler(
                     prefs.playerDownKeyOsdFocusTarget = value
                     renderer.refreshSection(entry.id)
                 }
+            }
+
+            SettingId.PlayerTogglePlayStateShowOsd -> {
+                prefs.playerTogglePlayStateShowOsd = !prefs.playerTogglePlayStateShowOsd
+                renderer.refreshSection(entry.id)
             }
 
             SettingId.PlayerPersistentBottomProgressEnabled -> {

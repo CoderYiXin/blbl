@@ -1649,15 +1649,22 @@ class PlayerActivity : BaseActivity() {
             KeyEvent.KEYCODE_NUMPAD_ENTER,
             -> {
                 if (!isSidePanelVisible() && !hasControlsFocus()) {
-                    if (osdMode == OsdMode.Hidden) binding.btnPlayPause.performClick()
+                    if (osdMode == OsdMode.Hidden) {
+                        binding.btnPlayPause.performClick()
+                        if (osdMode != OsdMode.Hidden) {
+                            focusFirstControl()
+                        }
+                        return true
+                    }
                     setControlsVisible(true)
                     focusFirstControl()
                     return true
                 }
                 if (osdMode == OsdMode.Hidden && !isSidePanelVisible()) {
                     binding.btnPlayPause.performClick()
-                    setControlsVisible(true)
-                    focusFirstControl()
+                    if (osdMode != OsdMode.Hidden) {
+                        focusFirstControl()
+                    }
                     return true
                 }
             }
@@ -1960,6 +1967,16 @@ class PlayerActivity : BaseActivity() {
         )
     }
 
+    internal fun shouldShowOsdOnPlaybackToggle(): Boolean {
+        if (isSidePanelVisible()) return true
+        if (osdMode != OsdMode.Hidden) return true
+        return BiliClient.prefs.playerTogglePlayStateShowOsd
+    }
+
+    internal fun togglePlayPauseFromUser(showHint: Boolean = false) {
+        togglePlayPause(showControls = shouldShowOsdOnPlaybackToggle(), showHint = showHint)
+    }
+
     internal fun togglePlayPause(showControls: Boolean = true, showHint: Boolean = false) {
         val engine = player ?: return
         if (engine.playbackState == Player.STATE_ENDED) {
@@ -1991,7 +2008,7 @@ class PlayerActivity : BaseActivity() {
         binding.btnFav.setOnClickListener { onFavButtonClicked() }
 
         binding.btnPlayPause.setOnClickListener {
-            togglePlayPause(showControls = true)
+            togglePlayPauseFromUser()
         }
         binding.btnPrev.setOnClickListener {
             playPrevByPlaybackMode(userInitiated = true)
