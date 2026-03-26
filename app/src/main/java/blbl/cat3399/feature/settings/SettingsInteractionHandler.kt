@@ -1372,7 +1372,7 @@ class SettingsInteractionHandler(
 
             SettingId.DynamicFollowingRecentUpdateDotEnabled -> {
                 prefs.dynamicFollowingRecentUpdateDotEnabled = !prefs.dynamicFollowingRecentUpdateDotEnabled
-                AppToast.show(activity, "优先显示最近更新Up：${if (prefs.dynamicFollowingRecentUpdateDotEnabled) "开" else "关"}")
+                AppToast.show(activity, "动态页小红点：${if (prefs.dynamicFollowingRecentUpdateDotEnabled) "开" else "关"}")
                 renderer.refreshSection(entry.id)
             }
 

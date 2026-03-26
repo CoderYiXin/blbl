@@ -227,7 +227,7 @@ class SettingsRenderer(
                     ),
                     SettingEntry(
                         SettingId.DynamicFollowingRecentUpdateDotEnabled,
-                        "优先显示最近更新Up",
+                        "动态页小红点",
                         if (prefs.dynamicFollowingRecentUpdateDotEnabled) "开" else "关",
                         null,
                     ),
