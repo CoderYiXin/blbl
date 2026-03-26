@@ -59,6 +59,13 @@ class SidebarNavAdapter(
 
     fun selectedAdapterPosition(): Int = items.indexOfFirst { it.id == selectedId }
 
+    fun selectedNavId(): Int = selectedId
+
+    fun matches(
+        list: List<NavItem>,
+        selectedId: Int,
+    ): Boolean = items == list && this.selectedId == selectedId
+
     override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Vh {
         val binding = ItemSidebarNavBinding.inflate(LayoutInflater.from(parent.context), parent, false)
         return Vh(binding)
@@ -125,5 +132,6 @@ class SidebarNavAdapter(
         const val ID_DYNAMIC = 3
         const val ID_LIVE = 4
         const val ID_MY = 5
+        const val ID_CUSTOM = 6
     }
 }

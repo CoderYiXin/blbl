@@ -1,5 +1,6 @@
-package blbl.cat3399.feature.live
+package blbl.cat3399.feature.custom
 
+import android.content.Intent
 import android.os.Bundle
 import android.view.LayoutInflater
 import android.view.View
@@ -8,65 +9,113 @@ import androidx.fragment.app.Fragment
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
+import blbl.cat3399.R
 import blbl.cat3399.core.api.BiliApi
 import blbl.cat3399.core.log.AppLog
+import blbl.cat3399.core.model.VideoCard
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.paging.PagedGridStateMachine
+import blbl.cat3399.core.paging.appliedOrNull
 import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.DpadGridController
 import blbl.cat3399.core.ui.FocusTreeUtils
 import blbl.cat3399.core.ui.GridSpanPolicy
 import blbl.cat3399.core.ui.TabContentSwitchFocusHost
+import blbl.cat3399.core.ui.TabSwitchFocusTarget
 import blbl.cat3399.core.ui.postIfAlive
 import blbl.cat3399.core.ui.postIfAttached
 import blbl.cat3399.core.ui.requestFocusAdapterPositionReliable
 import blbl.cat3399.core.ui.requestFocusFirstItemOrSelfAfterRefresh
-import blbl.cat3399.databinding.FragmentLiveGridBinding
+import blbl.cat3399.databinding.FragmentVideoGridBinding
+import blbl.cat3399.feature.following.openUpDetailFromVideoCard
+import blbl.cat3399.feature.player.PlayerActivity
+import blbl.cat3399.feature.player.PlayerPlaylistItem
+import blbl.cat3399.feature.player.PlayerPlaylistStore
+import blbl.cat3399.feature.video.VideoCardAdapter
+import blbl.cat3399.feature.video.VideoDetailActivity
 import blbl.cat3399.ui.RefreshKeyHandler
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
-class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFocusTarget, RefreshKeyHandler {
-    private var _binding: FragmentLiveGridBinding? = null
+class CustomDynamicVideoFragment : Fragment(), RefreshKeyHandler, TabSwitchFocusTarget {
+    private data class FetchedPage(
+        val items: List<VideoCard>,
+        val nextOffset: String?,
+    )
+
+    private var _binding: FragmentVideoGridBinding? = null
     private val binding get() = _binding!!
 
-    private lateinit var adapter: LiveAreaAdapter
-
-    private val parentAreaId: Int by lazy { requireArguments().getInt(ARG_PARENT_AREA_ID, 0) }
-    private val parentTitle: String by lazy { requireArguments().getString(ARG_PARENT_TITLE).orEmpty() }
-
+    private lateinit var adapter: VideoCardAdapter
     private var initialLoadTriggered: Boolean = false
-    private var requestToken: Int = 0
+
+    private val loadedBvids = HashSet<String>()
+    private val paging = PagedGridStateMachine<String?>(initialKey = null)
 
     private var pendingFocusFirstCardFromTab: Boolean = false
     private var pendingFocusFirstCardFromContentSwitch: Boolean = false
     private var pendingFocusFirstCardFromBackToTab0: Boolean = false
-    private var lastFocusedAdapterPosition: Int? = null
-    private var pendingRestorePosition: Int? = null
     private var pendingFocusFirstCardAfterRefresh: Boolean = false
+    private var lastFocusedAdapterPosition: Int? = null
     private var dpadGridController: DpadGridController? = null
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
-        _binding = FragmentLiveGridBinding.inflate(inflater, container, false)
+        _binding = FragmentVideoGridBinding.inflate(inflater, container, false)
         return binding.root
     }
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         if (!::adapter.isInitialized) {
             adapter =
-                LiveAreaAdapter { position, area ->
-                    pendingRestorePosition = position
-                    val nav = parentFragment as? LiveNavigator
-                    if (nav == null) {
-                        AppToast.show(requireContext(), "无法打开分区：找不到导航宿主")
-                        return@LiveAreaAdapter
-                    }
-                    nav.openAreaDetail(
-                        parentAreaId = parentAreaId,
-                        parentTitle = parentTitle,
-                        areaId = area.id,
-                        areaTitle = area.name,
-                    )
-                }
+                VideoCardAdapter(
+                    onClick = { card, pos ->
+                        val cards = adapter.snapshot()
+                        val playlistItems =
+                            cards.map {
+                                PlayerPlaylistItem(
+                                    bvid = it.bvid,
+                                    cid = it.cid,
+                                    title = it.title,
+                                )
+                            }
+                        val token =
+                            PlayerPlaylistStore.put(
+                                items = playlistItems,
+                                index = pos,
+                                source = "CustomDynamic",
+                                uiCards = cards,
+                            )
+                        if (BiliClient.prefs.playerOpenDetailBeforePlay) {
+                            startActivity(
+                                Intent(requireContext(), VideoDetailActivity::class.java)
+                                    .putExtra(VideoDetailActivity.EXTRA_BVID, card.bvid)
+                                    .putExtra(VideoDetailActivity.EXTRA_CID, card.cid ?: -1L)
+                                    .apply { card.aid?.let { putExtra(VideoDetailActivity.EXTRA_AID, it) } }
+                                    .putExtra(VideoDetailActivity.EXTRA_TITLE, card.title)
+                                    .putExtra(VideoDetailActivity.EXTRA_COVER_URL, card.coverUrl)
+                                    .apply {
+                                        card.ownerName.takeIf { it.isNotBlank() }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_NAME, it) }
+                                        card.ownerFace?.takeIf { it.isNotBlank() }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_AVATAR, it) }
+                                        card.ownerMid?.takeIf { it > 0L }?.let { putExtra(VideoDetailActivity.EXTRA_OWNER_MID, it) }
+                                    }
+                                    .putExtra(VideoDetailActivity.EXTRA_PLAYLIST_TOKEN, token)
+                                    .putExtra(VideoDetailActivity.EXTRA_PLAYLIST_INDEX, pos),
+                            )
+                        } else {
+                            startActivity(
+                                Intent(requireContext(), PlayerActivity::class.java)
+                                    .putExtra(PlayerActivity.EXTRA_BVID, card.bvid)
+                                    .putExtra(PlayerActivity.EXTRA_CID, card.cid ?: -1L)
+                                    .putExtra(PlayerActivity.EXTRA_PLAYLIST_TOKEN, token)
+                                    .putExtra(PlayerActivity.EXTRA_PLAYLIST_INDEX, pos),
+                            )
+                        }
+                    },
+                    onLongClick = { card, _ ->
+                        openUpDetailFromVideoCard(card)
+                        true
+                    },
+                )
         }
 
         binding.recycler.adapter = adapter
@@ -74,6 +123,21 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
         binding.recycler.layoutManager = GridLayoutManager(requireContext(), spanCountForWidth())
         (binding.recycler.itemAnimator as? androidx.recyclerview.widget.SimpleItemAnimator)?.supportsChangeAnimations = false
         binding.recycler.clearOnScrollListeners()
+        binding.recycler.addOnScrollListener(
+            object : RecyclerView.OnScrollListener() {
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    if (dy <= 0) return
+                    val snapshot = paging.snapshot()
+                    if (snapshot.isLoading || snapshot.endReached) return
+                    val lm = recyclerView.layoutManager as? GridLayoutManager ?: return
+                    val lastVisible = lm.findLastVisibleItemPosition()
+                    val total = adapter.itemCount
+                    if (total <= 0) return
+                    if (total - lastVisible - 1 <= 8) loadNextPage()
+                }
+            },
+        )
+
         dpadGridController?.release()
         dpadGridController =
             DpadGridController(
@@ -81,8 +145,7 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
                 callbacks =
                     object : DpadGridController.Callbacks {
                         override fun onTopEdge(): Boolean {
-                            focusSelectedTabIfAvailable()
-                            return true
+                            return focusSelectedTabIfAvailable()
                         }
 
                         override fun onLeftEdge(): Boolean {
@@ -93,21 +156,23 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
                             switchToNextTabFromContentEdge()
                         }
 
-                        override fun canLoadMore(): Boolean = false
+                        override fun canLoadMore(): Boolean = !paging.snapshot().endReached
 
-                        override fun loadMore() = Unit
+                        override fun loadMore() {
+                            loadNextPage()
+                        }
                     },
                 config =
                     DpadGridController.Config(
                         isEnabled = { _binding != null && isResumed },
+                        enableCenterLongPressToLongClick = true,
                     ),
             ).also { it.install() }
+
         binding.swipeRefresh.setOnRefreshListener {
             pendingFocusFirstCardAfterRefresh = true
-            pendingRestorePosition = null
-            clearPendingFocusFlags()
             dpadGridController?.parkFocusForDataSetReset()
-            reload(force = true)
+            resetAndLoad()
         }
     }
 
@@ -115,8 +180,15 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
         super.onResume()
         (binding.recycler.layoutManager as? GridLayoutManager)?.spanCount = spanCountForWidth()
         maybeTriggerInitialLoad()
-        restoreFocusIfNeeded()
         maybeConsumePendingFocusFirstCard()
+    }
+
+    override fun onDestroyView() {
+        initialLoadTriggered = false
+        dpadGridController?.release()
+        dpadGridController = null
+        _binding = null
+        super.onDestroyView()
     }
 
     override fun handleRefreshKey(): Boolean {
@@ -124,88 +196,16 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
         if (!isResumed) return false
         if (b.swipeRefresh.isRefreshing) return true
         pendingFocusFirstCardAfterRefresh = true
-        pendingRestorePosition = null
-        clearPendingFocusFlags()
         dpadGridController?.parkFocusForDataSetReset()
         b.swipeRefresh.isRefreshing = true
-        reload(force = true)
+        resetAndLoad()
         return true
-    }
-
-    private fun maybeTriggerInitialLoad() {
-        if (initialLoadTriggered) return
-        if (!this::adapter.isInitialized) return
-        if (adapter.itemCount != 0) {
-            initialLoadTriggered = true
-            return
-        }
-        if (binding.swipeRefresh.isRefreshing) return
-        binding.swipeRefresh.isRefreshing = true
-        reload(force = false)
-        initialLoadTriggered = true
-    }
-
-    private fun reload(force: Boolean) {
-        val token = ++requestToken
-        viewLifecycleOwner.lifecycleScope.launch {
-            try {
-                val parents = BiliApi.liveAreas(force = force)
-                if (token != requestToken) return@launch
-                val pickedParent = parents.firstOrNull { it.id == parentAreaId }
-                val children =
-                    pickedParent
-                        ?.children
-                        ?.filter { it.id > 0 && it.name.isNotBlank() }
-                        .orEmpty()
-                adapter.submit(children)
-                _binding?.let { b ->
-                    b.recycler.postIfAlive(isAlive = { _binding === b && isResumed }) {
-                        if (pendingFocusFirstCardAfterRefresh) {
-                            pendingFocusFirstCardAfterRefresh = false
-                            clearPendingFocusFlags()
-                            pendingRestorePosition = null
-
-                            val recycler = b.recycler
-                            val isUiAlive = { _binding === b && isResumed }
-                            recycler.requestFocusFirstItemOrSelfAfterRefresh(
-                                itemCount = adapter.itemCount,
-                                smoothScroll = false,
-                                isAlive = isUiAlive,
-                                onDone = { focusedFirstItem ->
-                                    if (focusedFirstItem) lastFocusedAdapterPosition = 0
-                                    dpadGridController?.unparkFocusAfterDataSetReset()
-                                },
-                            )
-                            return@postIfAlive
-                        }
-                        restoreFocusIfNeeded()
-                        maybeConsumePendingFocusFirstCard()
-                    }
-                }
-            } catch (t: Throwable) {
-                if (t is CancellationException) throw t
-                AppLog.e("LiveAreaIndex", "load failed pid=$parentAreaId title=$parentTitle", t)
-                context?.let { AppToast.show(it, "加载失败，可查看 Logcat(标签 BLBL)") }
-            } finally {
-                if (token == requestToken) _binding?.swipeRefresh?.isRefreshing = false
-            }
-        }
-    }
-
-    private fun spanCountForWidth(): Int {
-        val dm = resources.displayMetrics
-        val widthDp = dm.widthPixels / dm.density
-        return GridSpanPolicy.fixedSpanCountForWidthDp(
-            widthDp = widthDp,
-            overrideSpanCount = BiliClient.prefs.gridSpanCount,
-        )
     }
 
     override fun requestFocusFirstCardFromTab(): Boolean {
         pendingFocusFirstCardFromTab = true
         pendingFocusFirstCardFromContentSwitch = false
         pendingFocusFirstCardFromBackToTab0 = false
-        pendingRestorePosition = null
         if (!isResumed) return true
         return maybeConsumePendingFocusFirstCard()
     }
@@ -222,87 +222,107 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
         pendingFocusFirstCardFromBackToTab0 = true
         pendingFocusFirstCardFromTab = false
         pendingFocusFirstCardFromContentSwitch = false
-        pendingRestorePosition = null
         if (!isResumed) return true
         return maybeConsumePendingFocusFirstCard()
     }
 
-    override fun restoreFocusAfterReturnFromDetail(): Boolean {
-        // Same idea as "MyFavFoldersFragment": keep a pending position and restore focus after
-        // returning from detail. ViewPager2 may destroy/recreate page views when we hide it, so we
-        // must not drop the pending position too early.
-        if (pendingRestorePosition == null) return false
-        if (!isResumed) return true
-        restoreFocusIfNeeded()
-        return true
+    private fun maybeTriggerInitialLoad() {
+        if (initialLoadTriggered) return
+        if (!this::adapter.isInitialized) return
+        if (adapter.itemCount != 0) {
+            initialLoadTriggered = true
+            return
+        }
+        if (binding.swipeRefresh.isRefreshing) return
+        binding.swipeRefresh.isRefreshing = true
+        resetAndLoad()
+        initialLoadTriggered = true
     }
 
-    private fun restoreFocusIfNeeded(): Boolean {
-        val pos = pendingRestorePosition ?: return false
-        if (!isAdded || _binding == null) return false
-        if (!isResumed) return false
-        if (!this::adapter.isInitialized) return false
+    private fun resetAndLoad() {
+        paging.reset()
+        loadedBvids.clear()
+        loadNextPage(isRefresh = true)
+    }
 
-        if (pos < 0) {
-            pendingRestorePosition = null
-            return false
-        }
+    private fun loadNextPage(isRefresh: Boolean = false) {
+        val startSnapshot = paging.snapshot()
+        if (startSnapshot.isLoading || startSnapshot.endReached) return
+        val startGeneration = startSnapshot.generation
+        viewLifecycleOwner.lifecycleScope.launch {
+            try {
+                val result =
+                    paging.loadNextPage(
+                        isRefresh = isRefresh,
+                        fetch = { offset ->
+                            val page = BiliApi.dynamicAllVideo(offset = offset)
+                            FetchedPage(
+                                items = page.items,
+                                nextOffset = page.nextOffset,
+                            )
+                        },
+                        reduce = { _, fetched ->
+                            val seen = HashSet<String>(fetched.items.size)
+                            val filtered =
+                                fetched.items.filter {
+                                    if (loadedBvids.contains(it.bvid)) return@filter false
+                                    seen.add(it.bvid)
+                                }
+                            PagedGridStateMachine.Update(
+                                items = filtered,
+                                nextKey = fetched.nextOffset,
+                                endReached = fetched.nextOffset == null,
+                            )
+                        },
+                    )
 
-        val itemCount = adapter.itemCount
-        // When returning from detail, the page view may be recreated and data might not be bound yet.
-        // Keep the pending position so we can retry after reload().
-        if (itemCount == 0) return false
-        // Data changed; give up to avoid blocking other focus flows forever.
-        if (pos >= itemCount) {
-            pendingRestorePosition = null
-            return false
-        }
-
-        val recycler = binding.recycler
-        recycler.postIfAlive(isAlive = { _binding != null }) {
-            recycler.scrollToPosition(pos)
-            recycler.postIfAlive(isAlive = { _binding != null }) {
-                tryRestoreFocusAtPosition(recycler = recycler, pos = pos, attemptsLeft = 3)
+                val applied = result.appliedOrNull() ?: return@launch
+                applied.items.forEach { loadedBvids.add(it.bvid) }
+                if (applied.isRefresh) {
+                    adapter.submit(applied.items)
+                } else if (applied.items.isNotEmpty()) {
+                    adapter.append(applied.items)
+                }
+                _binding?.let { b ->
+                    b.recycler.postIfAlive(isAlive = { _binding === b && isResumed }) {
+                        if (pendingFocusFirstCardAfterRefresh && applied.isRefresh) {
+                            pendingFocusFirstCardAfterRefresh = false
+                            clearPendingFocusFlags()
+                            val recycler = b.recycler
+                            val isUiAlive = { _binding === b && isResumed }
+                            recycler.requestFocusFirstItemOrSelfAfterRefresh(
+                                itemCount = adapter.itemCount,
+                                smoothScroll = false,
+                                isAlive = isUiAlive,
+                                onDone = { focusedFirstItem ->
+                                    if (focusedFirstItem) lastFocusedAdapterPosition = 0
+                                },
+                            )
+                            return@postIfAlive
+                        }
+                        maybeConsumePendingFocusFirstCard()
+                        dpadGridController?.consumePendingFocusAfterLoadMore()
+                    }
+                }
+            } catch (t: Throwable) {
+                if (t is CancellationException) throw t
+                AppLog.e("CustomDynamic", "load failed", t)
+                context?.let { AppToast.show(it, "加载失败，可查看 Logcat(标签 BLBL)") }
+            } finally {
+                if (isRefresh && paging.snapshot().generation == startGeneration) {
+                    _binding?.swipeRefresh?.isRefreshing = false
+                }
             }
-        }
-        return true
-    }
-
-    private fun tryRestoreFocusAtPosition(recycler: RecyclerView, pos: Int, attemptsLeft: Int) {
-        if (!isAdded || _binding == null || !isResumed) return
-        if (pendingRestorePosition != pos) return
-
-        val vh = recycler.findViewHolderForAdapterPosition(pos)
-        if (vh != null) {
-            vh.itemView.requestFocus()
-            pendingRestorePosition = null
-            return
-        }
-
-        if (attemptsLeft <= 0) {
-            // Fallback: keep focus visible even if the target view isn't laid out yet.
-            recycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() == true ||
-                focusSelectedTabIfAvailable() ||
-                recycler.requestFocus()
-            pendingRestorePosition = null
-            return
-        }
-
-        recycler.postIfAlive(isAlive = { isAdded && _binding != null && isResumed }) {
-            tryRestoreFocusAtPosition(recycler = recycler, pos = pos, attemptsLeft = attemptsLeft - 1)
         }
     }
 
     private fun maybeConsumePendingFocusFirstCard(): Boolean {
-        if (pendingRestorePosition != null) return false
         if (!pendingFocusFirstCardFromTab && !pendingFocusFirstCardFromContentSwitch && !pendingFocusFirstCardFromBackToTab0) return false
         if (!isAdded || _binding == null) return false
         if (!isResumed) return false
 
         val focused = activity?.currentFocus
         if (focused != null && focused != binding.recycler && FocusTreeUtils.isDescendantOf(focused, binding.recycler)) {
-            // If we are already focused inside the grid, consider the request satisfied, except for
-            // "Back -> tab0 content" which must deterministically land on the first card.
             val holder = binding.recycler.findContainingViewHolder(focused)
             val pos = holder?.bindingAdapterPosition?.takeIf { it != RecyclerView.NO_POSITION }
             if (pendingFocusFirstCardFromBackToTab0) {
@@ -319,8 +339,7 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
         }
 
         val parentView = parentFragment?.view
-        val tabLayout =
-            parentView?.findViewById<com.google.android.material.tabs.TabLayout?>(blbl.cat3399.R.id.tab_layout)
+        val tabLayout = parentView?.findViewById<com.google.android.material.tabs.TabLayout?>(R.id.tab_layout)
         if (pendingFocusFirstCardFromTab) {
             if (focused == null || tabLayout == null || !FocusTreeUtils.isDescendantOf(focused, tabLayout)) {
                 pendingFocusFirstCardFromTab = false
@@ -334,11 +353,13 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
         }
 
         val targetPosition = resolvePendingFocusTarget(itemCount = adapter.itemCount)
-        val recycler = binding.recycler
+        val b = _binding ?: return false
+        val recycler = b.recycler
+        val isUiAlive = { _binding === b && isResumed }
         recycler.requestFocusAdapterPositionReliable(
             position = targetPosition,
             smoothScroll = false,
-            isAlive = { _binding != null && isResumed },
+            isAlive = isUiAlive,
             onFocused = {
                 lastFocusedAdapterPosition = targetPosition
                 clearPendingFocusFlags()
@@ -376,9 +397,19 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
         lastFocusedAdapterPosition = position
     }
 
+    private fun spanCountForWidth(): Int {
+        val dm = resources.displayMetrics
+        val widthDp = dm.widthPixels / dm.density
+        return GridSpanPolicy.dynamicSpanCountForWidthDp(
+            widthDp = widthDp,
+            dynamicOverrideSpanCount = BiliClient.prefs.dynamicGridSpanCount,
+            globalOverrideSpanCount = BiliClient.prefs.gridSpanCount,
+        )
+    }
+
     private fun focusSelectedTabIfAvailable(): Boolean {
         val parentView = parentFragment?.view ?: return false
-        val tabLayout = parentView.findViewById<com.google.android.material.tabs.TabLayout?>(blbl.cat3399.R.id.tab_layout) ?: return false
+        val tabLayout = parentView.findViewById<com.google.android.material.tabs.TabLayout?>(R.id.tab_layout) ?: return false
         val tabStrip = tabLayout.getChildAt(0) as? ViewGroup ?: return false
         val pos = tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: 0
         tabStrip.getChildAt(pos)?.requestFocus() ?: return false
@@ -387,7 +418,7 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
 
     private fun switchToNextTabFromContentEdge(): Boolean {
         val parentView = parentFragment?.view ?: return false
-        val tabLayout = parentView.findViewById<com.google.android.material.tabs.TabLayout?>(blbl.cat3399.R.id.tab_layout) ?: return false
+        val tabLayout = parentView.findViewById<com.google.android.material.tabs.TabLayout?>(R.id.tab_layout) ?: return false
         if (tabLayout.tabCount <= 1) return false
         val tabStrip = tabLayout.getChildAt(0) as? ViewGroup ?: return false
         val cur = tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: 0
@@ -404,7 +435,7 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
 
     private fun switchToPrevTabFromContentEdge(): Boolean {
         val parentView = parentFragment?.view ?: return false
-        val tabLayout = parentView.findViewById<com.google.android.material.tabs.TabLayout?>(blbl.cat3399.R.id.tab_layout) ?: return false
+        val tabLayout = parentView.findViewById<com.google.android.material.tabs.TabLayout?>(R.id.tab_layout) ?: return false
         if (tabLayout.tabCount <= 1) return false
         val tabStrip = tabLayout.getChildAt(0) as? ViewGroup ?: return false
         val cur = tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: 0
@@ -419,25 +450,7 @@ class LiveAreaIndexFragment : Fragment(), LivePageFocusTarget, LivePageReturnFoc
         return true
     }
 
-    override fun onDestroyView() {
-        initialLoadTriggered = false
-        dpadGridController?.release()
-        dpadGridController = null
-        _binding = null
-        super.onDestroyView()
-    }
-
     companion object {
-        private const val ARG_PARENT_AREA_ID = "parent_area_id"
-        private const val ARG_PARENT_TITLE = "parent_title"
-
-        fun newInstance(parentAreaId: Int, parentTitle: String): LiveAreaIndexFragment =
-            LiveAreaIndexFragment().apply {
-                arguments =
-                    Bundle().apply {
-                        putInt(ARG_PARENT_AREA_ID, parentAreaId)
-                        putString(ARG_PARENT_TITLE, parentTitle)
-                    }
-            }
+        fun newInstance() = CustomDynamicVideoFragment()
     }
 }

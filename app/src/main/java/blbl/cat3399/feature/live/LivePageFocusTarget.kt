@@ -1,6 +1,8 @@
 package blbl.cat3399.feature.live
 
-interface LivePageFocusTarget {
+import blbl.cat3399.core.ui.TabContentFocusTarget
+
+interface LivePageFocusTarget : TabContentFocusTarget {
     // Entering content from a focused tab item: focus first card.
     fun requestFocusFirstCardFromTab(): Boolean
 
@@ -8,6 +10,11 @@ interface LivePageFocusTarget {
     fun requestFocusFirstCardFromContentSwitch(): Boolean
 
     // Returning to tab0 content via Back key (scheme B): always focus the first card deterministically.
-    // Default implementation keeps backward compatibility for existing targets.
     fun requestFocusFirstCardFromBackToTab0(): Boolean = requestFocusFirstCardFromContentSwitch()
+
+    override fun requestFocusPrimaryItemFromTab(): Boolean = requestFocusFirstCardFromTab()
+
+    override fun requestFocusPrimaryItemFromContentSwitch(): Boolean = requestFocusFirstCardFromContentSwitch()
+
+    override fun requestFocusPrimaryItemFromBackToTab0(): Boolean = requestFocusFirstCardFromBackToTab0()
 }

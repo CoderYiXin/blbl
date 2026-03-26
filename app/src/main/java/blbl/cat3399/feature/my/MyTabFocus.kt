@@ -3,6 +3,7 @@ package blbl.cat3399.feature.my
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import blbl.cat3399.R
+import blbl.cat3399.core.ui.TabContentSwitchFocusHost
 import blbl.cat3399.core.ui.postIfAttached
 import com.google.android.material.tabs.TabLayout
 
@@ -26,7 +27,7 @@ fun Fragment.switchToNextMyTabFromContentEdge(): Boolean {
     if (next >= tabLayout.tabCount) return false
     tabLayout.getTabAt(next)?.select() ?: return false
     tabLayout.postIfAttached {
-        (parentFragment as? MyTabContentSwitchFocusHost)?.requestFocusCurrentPageFirstItemFromContentSwitch()
+        (parentFragment as? TabContentSwitchFocusHost)?.requestFocusCurrentPagePrimaryItemFromContentSwitch()
             ?: tabStrip.getChildAt(next)?.requestFocus()
     }
     return true
@@ -40,7 +41,7 @@ fun Fragment.switchToPrevMyTabFromContentEdge(): Boolean {
     if (prev < 0) return false
     tabLayout.getTabAt(prev)?.select() ?: return false
     tabLayout.postIfAttached {
-        (parentFragment as? MyTabContentSwitchFocusHost)?.requestFocusCurrentPageFirstItemFromContentSwitch()
+        (parentFragment as? TabContentSwitchFocusHost)?.requestFocusCurrentPagePrimaryItemFromContentSwitch()
             ?: tabStrip.getChildAt(prev)?.requestFocus()
     }
     return true

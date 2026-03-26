@@ -13,10 +13,12 @@ import blbl.cat3399.R
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.net.BiliClient
-import blbl.cat3399.core.ui.TabSwitchFocusTarget
+import blbl.cat3399.core.ui.TabContentFocusTarget
 import blbl.cat3399.core.ui.enableDpadTabFocus
+import blbl.cat3399.core.ui.findCurrentViewPagerChildFragmentAs
 import blbl.cat3399.core.ui.postDelayedIfAlive
 import blbl.cat3399.core.ui.postIfAlive
+import blbl.cat3399.core.ui.requestFocusSelectedTab
 import blbl.cat3399.databinding.FragmentHomeBinding
 import blbl.cat3399.feature.video.VideoGridTabSwitchFocusHost
 import blbl.cat3399.ui.BackPressHandler
@@ -34,16 +36,8 @@ class HomeFragment : Fragment(), VideoGridTabSwitchFocusHost, BackPressHandler {
     private var pendingBackToTab0AttemptsLeft: Int = 0
 
     private fun requestCurrentPageFocusFromContentSwitch(): Boolean {
-        val adapter = binding.viewPager.adapter as? FragmentStateAdapter ?: return false
-        val position = binding.viewPager.currentItem
-        val itemId = adapter.getItemId(position)
-        val byTag = childFragmentManager.findFragmentByTag("f$itemId")
-        val pageFragment =
-            when {
-                byTag is TabSwitchFocusTarget -> byTag
-                else -> childFragmentManager.fragments.firstOrNull { it.isVisible && it is TabSwitchFocusTarget } as? TabSwitchFocusTarget
-            } ?: return false
-        return pageFragment.requestFocusFirstCardFromContentSwitch()
+        val pageFragment = findCurrentViewPagerChildFragmentAs<TabContentFocusTarget>(binding.viewPager) ?: return false
+        return pageFragment.requestFocusPrimaryItemFromContentSwitch()
     }
 
     private fun maybeRequestTab0FocusFromBackToTab0(): Boolean {
@@ -52,13 +46,10 @@ class HomeFragment : Fragment(), VideoGridTabSwitchFocusHost, BackPressHandler {
         // "Back -> tab0 content" is only meaningful when tab0 is selected.
         if (b.viewPager.currentItem != 0) return false
 
-        val adapter = b.viewPager.adapter as? FragmentStateAdapter ?: return false
-        val itemId = adapter.getItemId(0)
-        val byTag = childFragmentManager.findFragmentByTag("f$itemId")
-        val tab0 = byTag as? TabSwitchFocusTarget
+        val tab0 = findCurrentViewPagerChildFragmentAs<TabContentFocusTarget>(b.viewPager)
         if (tab0 != null) {
             // Delegate to the page: it owns the actual "focus first card" flow.
-            tab0.requestFocusFirstCardFromBackToTab0()
+            tab0.requestFocusPrimaryItemFromBackToTab0()
             pendingFocusFirstCardFromBackToTab0 = false
             pendingBackToTab0AttemptsLeft = 0
             return true
@@ -78,27 +69,13 @@ class HomeFragment : Fragment(), VideoGridTabSwitchFocusHost, BackPressHandler {
     }
 
     private fun refreshCurrentPageFromTabReselect(): Boolean {
-        val adapter = binding.viewPager.adapter as? FragmentStateAdapter ?: return false
-        val position = binding.viewPager.currentItem
-        val itemId = adapter.getItemId(position)
-        val byTag = childFragmentManager.findFragmentByTag("f$itemId")
-        val page =
-            when {
-                byTag is RefreshKeyHandler -> byTag
-                else -> childFragmentManager.fragments.firstOrNull { it.isVisible && it is RefreshKeyHandler } as? RefreshKeyHandler
-            } ?: return false
+        val page = findCurrentViewPagerChildFragmentAs<RefreshKeyHandler>(binding.viewPager) ?: return false
         return page.handleRefreshKey()
     }
 
     private fun focusSelectedTab(): Boolean {
         val b = _binding ?: return false
-        val tabStrip = b.tabLayout.getChildAt(0) as? ViewGroup ?: return false
-        val pos = b.tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: b.viewPager.currentItem
-        if (pos < 0 || pos >= tabStrip.childCount) return false
-        b.tabLayout.postIfAlive(isAlive = { _binding != null }) {
-            tabStrip.getChildAt(pos)?.requestFocus()
-        }
-        return true
+        return b.tabLayout.requestFocusSelectedTab(fallbackPosition = b.viewPager.currentItem) { _binding != null }
     }
 
     override fun onCreateView(inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?): View {
@@ -137,16 +114,9 @@ class HomeFragment : Fragment(), VideoGridTabSwitchFocusHost, BackPressHandler {
             for (i in 0 until tabStrip.childCount) {
                 tabStrip.getChildAt(i).setOnKeyListener { _, keyCode, event ->
                     if (event.action == KeyEvent.ACTION_DOWN && keyCode == KeyEvent.KEYCODE_DPAD_DOWN) {
-                        val adapter = binding.viewPager.adapter as? FragmentStateAdapter ?: return@setOnKeyListener false
-                        val position = binding.viewPager.currentItem
-                        val itemId = adapter.getItemId(position)
-                        val byTag = childFragmentManager.findFragmentByTag("f$itemId")
-                        val pageFragment =
-                            when {
-                                byTag is TabSwitchFocusTarget -> byTag
-                                else -> childFragmentManager.fragments.firstOrNull { it.isVisible && it is TabSwitchFocusTarget } as? TabSwitchFocusTarget
-                            } ?: return@setOnKeyListener false
-                        return@setOnKeyListener pageFragment.requestFocusFirstCardFromTab()
+                        val pageFragment = findCurrentViewPagerChildFragmentAs<TabContentFocusTarget>(binding.viewPager)
+                            ?: return@setOnKeyListener false
+                        return@setOnKeyListener pageFragment.requestFocusPrimaryItemFromTab()
                     }
                     false
                 }

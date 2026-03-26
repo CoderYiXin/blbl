@@ -8,13 +8,15 @@ import android.view.View
 import android.view.ViewGroup
 import androidx.fragment.app.Fragment
 import androidx.recyclerview.widget.RecyclerView
-import androidx.viewpager2.adapter.FragmentStateAdapter
 import blbl.cat3399.R
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.ui.enableDpadTabFocus
+import blbl.cat3399.core.ui.findCurrentViewPagerChildFragment
+import blbl.cat3399.core.ui.findCurrentViewPagerChildFragmentAs
 import blbl.cat3399.core.ui.postIfAlive
+import blbl.cat3399.core.ui.requestFocusSelectedTab
 import blbl.cat3399.databinding.FragmentMyTabsBinding
 import blbl.cat3399.ui.BackPressHandler
 import com.google.android.material.tabs.TabLayoutMediator
@@ -95,23 +97,13 @@ class MyTabsFragment : Fragment(), MyTabContentSwitchFocusHost, BackPressHandler
     }
 
     private fun refreshCurrentPageFromTabReselect(): Boolean {
-        val adapter = binding.viewPager.adapter as? FragmentStateAdapter ?: return false
-        val position = binding.viewPager.currentItem
-        val itemId = adapter.getItemId(position)
-        val byTag = childFragmentManager.findFragmentByTag("f$itemId")
-        val target = (byTag as? RefreshKeyHandler)
-            ?: (childFragmentManager.fragments.firstOrNull { it.isVisible && it is RefreshKeyHandler } as? RefreshKeyHandler)
-            ?: return false
+        val target = findCurrentViewPagerChildFragmentAs<RefreshKeyHandler>(binding.viewPager) ?: return false
         return target.handleRefreshKey()
     }
 
     private fun focusCurrentPageFirstItem(): Boolean {
-        val adapter = binding.viewPager.adapter as? FragmentStateAdapter ?: return false
-        val position = binding.viewPager.currentItem
-        val itemId = adapter.getItemId(position)
-        val byTag = childFragmentManager.findFragmentByTag("f$itemId")
-        val target = (byTag as? MyTabSwitchFocusTarget)
-            ?: (childFragmentManager.fragments.firstOrNull { it.isVisible && it is MyTabSwitchFocusTarget } as? MyTabSwitchFocusTarget)
+        val byTag = findCurrentViewPagerChildFragment(binding.viewPager)
+        val target = byTag as? MyTabSwitchFocusTarget
         if (target != null) return target.requestFocusFirstItemFromTabSwitch()
 
         val pageFragment =
@@ -146,25 +138,14 @@ class MyTabsFragment : Fragment(), MyTabContentSwitchFocusHost, BackPressHandler
     }
 
     private fun focusCurrentPageFirstItemFromContentSwitch(): Boolean {
-        val adapter = binding.viewPager.adapter as? FragmentStateAdapter ?: return false
-        val position = binding.viewPager.currentItem
-        val itemId = adapter.getItemId(position)
-        val byTag = childFragmentManager.findFragmentByTag("f$itemId")
-        val target = (byTag as? MyTabSwitchFocusTarget)
-            ?: (childFragmentManager.fragments.firstOrNull { it.isVisible && it is MyTabSwitchFocusTarget } as? MyTabSwitchFocusTarget)
+        val target = findCurrentViewPagerChildFragmentAs<MyTabSwitchFocusTarget>(binding.viewPager)
             ?: return false
         return target.requestFocusFirstItemFromTabSwitch()
     }
 
     private fun focusSelectedTab(): Boolean {
         val b = _binding ?: return false
-        val tabStrip = b.tabLayout.getChildAt(0) as? ViewGroup ?: return false
-        val pos = b.tabLayout.selectedTabPosition.takeIf { it >= 0 } ?: b.viewPager.currentItem
-        if (pos < 0 || pos >= tabStrip.childCount) return false
-        b.tabLayout.postIfAlive(isAlive = { _binding != null }) {
-            tabStrip.getChildAt(pos)?.requestFocus()
-        }
-        return true
+        return b.tabLayout.requestFocusSelectedTab(fallbackPosition = b.viewPager.currentItem) { _binding != null }
     }
 
     override fun requestFocusCurrentPageFirstItemFromContentSwitch(): Boolean {

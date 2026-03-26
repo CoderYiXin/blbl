@@ -30,6 +30,8 @@ import blbl.cat3399.core.log.LogUploadClient
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.prefs.AppConfigBackup
 import blbl.cat3399.core.prefs.AppPrefs
+import blbl.cat3399.core.prefs.CustomPageConfig
+import blbl.cat3399.core.prefs.CustomPageTabConfig
 import blbl.cat3399.core.prefs.PlayerCustomShortcut
 import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
 import blbl.cat3399.core.prefs.PlayerPlaybackModes
@@ -46,6 +48,8 @@ import blbl.cat3399.feature.player.AudioBalanceLevel
 import blbl.cat3399.feature.player.PlaybackSettingChoices
 import blbl.cat3399.feature.player.PlayerCustomShortcutCatalog
 import blbl.cat3399.feature.risk.GaiaVgateActivity
+import blbl.cat3399.feature.custom.CustomPageTabRegistry
+import blbl.cat3399.ui.MainRootNavRegistry
 import blbl.cat3399.ui.MainActivity
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -819,17 +823,13 @@ class SettingsInteractionHandler(
 
             SettingId.StartupPage -> {
                 val options =
-                    listOf(
-                        blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_HOME to "推荐",
-                        blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_CATEGORY to "分类",
-                        blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_DYNAMIC to "动态",
-                        blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_LIVE to "直播",
-                        blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_MY to "我的",
-                    )
+                    MainRootNavRegistry.startupSpecs().map { spec ->
+                        (spec.startupPageKey ?: AppPrefs.STARTUP_PAGE_HOME) to activity.getString(spec.titleRes)
+                    }
                 showChoiceDialog(
                     title = "启动默认页",
                     items = options.map { it.second },
-                    current = SettingsText.startupPageText(prefs.startupPage),
+                    current = SettingsText.startupPageText(activity, prefs.startupPage),
                 ) { selected ->
                     val key =
                         options.firstOrNull { it.second == selected }?.first
@@ -839,6 +839,15 @@ class SettingsInteractionHandler(
                     renderer.refreshSection(entry.id)
                 }
             }
+
+            SettingId.CustomPageEnabled -> {
+                val config = prefs.customPageConfig
+                prefs.customPageConfig = config.copy(enabled = !config.enabled)
+                AppToast.show(activity, "自定义页：${if (prefs.customPageConfig.enabled) "开" else "关"}")
+                renderer.refreshSection(entry.id)
+            }
+
+            SettingId.CustomPageContent -> showCustomPageContentDialog(sectionIndex = state.currentSectionIndex, focusId = entry.id)
 
             SettingId.FollowingListOrder -> {
                 val options =
@@ -1855,6 +1864,264 @@ class SettingsInteractionHandler(
                     },
                     onDismiss = {
                         if (!forward) showManager(focusKeyCode = focusKeyCode)
+                    },
+                )
+            }
+        }
+
+        Controller().showManager()
+    }
+
+    private fun showCustomPageContentDialog(sectionIndex: Int, focusId: SettingId) {
+        fun loadConfig(): CustomPageConfig = BiliClient.prefs.customPageConfig
+
+        fun saveConfig(config: CustomPageConfig) {
+            BiliClient.prefs.customPageConfig = config
+            renderer.refreshSection(focusId)
+        }
+
+        fun moveTab(
+            tabs: List<CustomPageTabConfig>,
+            fromIndex: Int,
+            toIndex: Int,
+        ): List<CustomPageTabConfig> {
+            if (fromIndex !in tabs.indices || toIndex !in tabs.indices) return tabs
+            val out = tabs.toMutableList()
+            val item = out.removeAt(fromIndex)
+            out.add(toIndex, item)
+            return out
+        }
+
+        class TabItemVh(itemView: View) : RecyclerView.ViewHolder(itemView) {
+            private val tvLabel: TextView = itemView.findViewById(blbl.cat3399.R.id.tv_label)
+            private val tvCheck: TextView = itemView.findViewById(blbl.cat3399.R.id.tv_check)
+
+            fun bind(label: String, onClick: () -> Unit) {
+                tvLabel.text = label
+                tvCheck.visibility = View.GONE
+                itemView.setOnClickListener { onClick() }
+                itemView.setOnKeyListener { _, keyCode, event ->
+                    when (keyCode) {
+                        KeyEvent.KEYCODE_DPAD_CENTER,
+                        KeyEvent.KEYCODE_ENTER,
+                        KeyEvent.KEYCODE_NUMPAD_ENTER,
+                        ->
+                            if (event.action == KeyEvent.ACTION_UP) {
+                                onClick()
+                                true
+                            } else {
+                                false
+                            }
+
+                        else -> false
+                    }
+                }
+            }
+        }
+
+        class TabListAdapter(
+            private val list: List<CustomPageTabConfig>,
+            private val onItemClick: (CustomPageTabConfig) -> Unit,
+        ) : RecyclerView.Adapter<TabItemVh>() {
+            override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): TabItemVh {
+                val view = LayoutInflater.from(parent.context).inflate(blbl.cat3399.R.layout.item_popup_choice, parent, false)
+                return TabItemVh(view)
+            }
+
+            override fun onBindViewHolder(holder: TabItemVh, position: Int) {
+                val item = list.getOrNull(position) ?: return
+                holder.bind(
+                    label = CustomPageTabRegistry.settingsLabelForConfig(item),
+                    onClick = { onItemClick(item) },
+                )
+            }
+
+            override fun getItemCount(): Int = list.size
+        }
+
+        class Controller {
+            fun showManager(focusStableKey: String? = null) {
+                var replacing = false
+                val config = loadConfig()
+                val tabs = config.tabs
+
+                AppPopup.custom(
+                    context = activity,
+                    title = "自定义页内容",
+                    cancelable = true,
+                    actions =
+                        listOf(
+                            PopupAction(
+                                role = PopupActionRole.NEUTRAL,
+                                text = "清空",
+                                dismissOnClick = false,
+                            ) {
+                                if (tabs.isEmpty()) {
+                                    AppToast.show(activity, "暂无内容")
+                                    return@PopupAction
+                                }
+                                replacing = true
+                                showClearConfirm(focusStableKey = focusStableKey)
+                            },
+                            PopupAction(role = PopupActionRole.NEGATIVE, text = "关闭"),
+                            PopupAction(
+                                role = PopupActionRole.POSITIVE,
+                                text = "新增",
+                                dismissOnClick = false,
+                            ) {
+                                replacing = true
+                                showAddPicker()
+                            },
+                        ),
+                    preferredActionRole = PopupActionRole.POSITIVE,
+                    autoFocus = true,
+                    onDismiss = {
+                        if (!replacing) renderer.showSection(sectionIndex, focusId = focusId)
+                    },
+                ) { dialogContext ->
+                    if (tabs.isEmpty()) {
+                        return@custom (LayoutInflater.from(dialogContext)
+                            .inflate(blbl.cat3399.R.layout.view_popup_message, null, false) as TextView).apply {
+                            text = "暂无内容，按“新增”添加来源。"
+                        }
+                    }
+
+                    val recycler =
+                        (LayoutInflater.from(dialogContext).inflate(blbl.cat3399.R.layout.view_popup_choice_list, null, false) as RecyclerView).apply {
+                            layoutManager = LinearLayoutManager(dialogContext)
+                            itemAnimator = null
+                        }
+                    recycler.adapter =
+                        TabListAdapter(tabs) { picked ->
+                            replacing = true
+                            showItemActions(picked.stableKey())
+                        }
+
+                    val focusIndex =
+                        focusStableKey?.let { key ->
+                            tabs.indexOfFirst { it.stableKey() == key }.takeIf { it >= 0 }
+                        } ?: 0
+                    recycler.scrollToPosition(focusIndex)
+                    recycler.post {
+                        val holder = recycler.findViewHolderForAdapterPosition(focusIndex)
+                        (holder?.itemView ?: recycler.getChildAt(0))?.requestFocus()
+                    }
+                    recycler
+                }
+            }
+
+            private fun showAddPicker() {
+                var forward = false
+                val config = loadConfig()
+                val options = CustomPageTabRegistry.availableAddOptions(config)
+                if (options.isEmpty()) {
+                    AppToast.show(activity, "可添加的来源已经用完")
+                    showManager()
+                    return
+                }
+
+                AppPopup.singleChoice(
+                    context = activity,
+                    title = "添加来源",
+                    items = options.map { it.label },
+                    checkedIndex = 0,
+                    onDismiss = {
+                        if (!forward) showManager()
+                    },
+                ) { which, _ ->
+                    val picked = options.getOrNull(which) ?: return@singleChoice
+                    forward = true
+                    val current = loadConfig()
+                    saveConfig(current.copy(tabs = current.tabs + picked.config))
+                    showManager(focusStableKey = picked.config.stableKey())
+                }
+            }
+
+            private fun showItemActions(focusStableKey: String) {
+                var forward = false
+                val config = loadConfig()
+                val index = config.tabs.indexOfFirst { it.stableKey() == focusStableKey }
+                if (index < 0) {
+                    showManager()
+                    return
+                }
+                val tab = config.tabs[index]
+
+                data class Action(
+                    val label: String,
+                    val nextConfig: CustomPageConfig,
+                    val nextFocusStableKey: String?,
+                )
+
+                val actions =
+                    buildList {
+                        if (index > 0) {
+                            val nextTabs = moveTab(config.tabs, fromIndex = index, toIndex = index - 1)
+                            add(
+                                Action(
+                                    label = "上移",
+                                    nextConfig = config.copy(tabs = nextTabs),
+                                    nextFocusStableKey = nextTabs.getOrNull(index - 1)?.stableKey(),
+                                ),
+                            )
+                        }
+                        if (index < config.tabs.lastIndex) {
+                            val nextTabs = moveTab(config.tabs, fromIndex = index, toIndex = index + 1)
+                            add(
+                                Action(
+                                    label = "下移",
+                                    nextConfig = config.copy(tabs = nextTabs),
+                                    nextFocusStableKey = nextTabs.getOrNull(index + 1)?.stableKey(),
+                                ),
+                            )
+                        }
+                        val nextTabs = config.tabs.filterIndexed { pos, _ -> pos != index }
+                        add(
+                            Action(
+                                label = "删除",
+                                nextConfig = config.copy(tabs = nextTabs),
+                                nextFocusStableKey = nextTabs.getOrNull(index)?.stableKey() ?: nextTabs.lastOrNull()?.stableKey(),
+                            ),
+                        )
+                    }
+
+                AppPopup.singleChoice(
+                    context = activity,
+                    title = CustomPageTabRegistry.settingsLabelForConfig(tab),
+                    items = actions.map { it.label },
+                    checkedIndex = 0,
+                    onDismiss = {
+                        if (!forward) showManager(focusStableKey = focusStableKey)
+                    },
+                ) { which, _ ->
+                    val picked = actions.getOrNull(which) ?: return@singleChoice
+                    forward = true
+                    saveConfig(picked.nextConfig)
+                    showManager(focusStableKey = picked.nextFocusStableKey)
+                }
+            }
+
+            private fun showClearConfirm(focusStableKey: String?) {
+                var forward = false
+                AppPopup.confirm(
+                    context = activity,
+                    title = "清空自定义页",
+                    message = "确定清空所有自定义页内容？",
+                    positiveText = "清空",
+                    negativeText = "取消",
+                    cancelable = true,
+                    onPositive = {
+                        forward = true
+                        val current = loadConfig()
+                        saveConfig(current.copy(tabs = emptyList()))
+                        showManager()
+                    },
+                    onNegative = {
+                        forward = true
+                        showManager(focusStableKey = focusStableKey)
+                    },
+                    onDismiss = {
+                        if (!forward) showManager(focusStableKey = focusStableKey)
                     },
                 )
             }

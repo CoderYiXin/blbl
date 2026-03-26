@@ -20,6 +20,8 @@ enum class SettingId(
 
     // 页面设置
     StartupPage("startup_page"),
+    CustomPageEnabled("custom_page_enabled"),
+    CustomPageContent("custom_page_content"),
     GridSpanCount("grid_span_count"),
     DynamicGridSpanCount("dynamic_grid_span_count"),
     PgcGridSpanCount("pgc_grid_span_count"),

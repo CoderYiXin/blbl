@@ -4,6 +4,9 @@ import android.app.ActivityManager
 import android.content.Context
 import android.content.res.Resources
 import blbl.cat3399.core.prefs.PlayerPlaybackModes
+import blbl.cat3399.core.prefs.CustomPageConfig
+import blbl.cat3399.feature.custom.CustomPageTabRegistry
+import blbl.cat3399.ui.MainRootNavRegistry
 import java.util.Locale
 import kotlin.math.roundToInt
 
@@ -83,14 +86,14 @@ object SettingsText {
             else -> "关注时间"
         }
 
-    fun startupPageText(prefValue: String): String =
-        when (prefValue) {
-            blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_CATEGORY -> "分类"
-            blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_DYNAMIC -> "动态"
-            blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_LIVE -> "直播"
-            blbl.cat3399.core.prefs.AppPrefs.STARTUP_PAGE_MY -> "我的"
-            else -> "推荐"
-        }
+    fun startupPageText(context: Context, prefValue: String): String = MainRootNavRegistry.startupTitle(context, prefValue)
+
+    fun customPageContentText(config: CustomPageConfig): String {
+        if (config.tabs.isEmpty()) return "未配置"
+        val labels = config.tabs.map { CustomPageTabRegistry.settingsLabelForConfig(it) }
+        if (labels.size <= 2) return labels.joinToString(separator = " / ")
+        return labels.take(2).joinToString(separator = " / ") + " 等${labels.size}项"
+    }
 
     fun mainBackFocusSchemeText(prefValue: String): String =
         when (prefValue) {

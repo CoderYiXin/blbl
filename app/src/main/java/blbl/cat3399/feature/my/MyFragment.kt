@@ -9,10 +9,11 @@ import androidx.fragment.app.Fragment
 import blbl.cat3399.R
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.ui.TabContentSwitchFocusHost
 import blbl.cat3399.databinding.FragmentMyContainerBinding
 import blbl.cat3399.ui.BackPressHandler
 
-class MyFragment : Fragment(), BackPressHandler, MyNavigator {
+class MyFragment : Fragment(), BackPressHandler, MyNavigator, TabContentSwitchFocusHost {
     private var _binding: FragmentMyContainerBinding? = null
     private val binding get() = _binding!!
 
@@ -43,6 +44,11 @@ class MyFragment : Fragment(), BackPressHandler, MyNavigator {
         if (childFragmentManager.popBackStackImmediate()) return true
         val current = childFragmentManager.findFragmentById(R.id.my_container)
         return (current as? BackPressHandler)?.handleBackPressed() == true
+    }
+
+    override fun requestFocusCurrentPagePrimaryItemFromContentSwitch(): Boolean {
+        val current = childFragmentManager.findFragmentById(R.id.my_container) as? TabContentSwitchFocusHost ?: return false
+        return current.requestFocusCurrentPagePrimaryItemFromContentSwitch()
     }
 
     override fun openFavFolder(mediaId: Long, title: String) {

@@ -200,7 +200,7 @@ class SettingsRenderer(
 
             "页面设置" ->
                 listOf(
-                    SettingEntry(SettingId.StartupPage, "启动默认页", SettingsText.startupPageText(prefs.startupPage), null),
+                    SettingEntry(SettingId.StartupPage, "启动默认页", SettingsText.startupPageText(activity, prefs.startupPage), null),
                     SettingEntry(SettingId.GridSpanCount, "每行卡片数量", SettingsText.gridSpanText(prefs.gridSpanCount), null),
                     SettingEntry(
                         SettingId.DynamicGridSpanCount,
@@ -216,6 +216,13 @@ class SettingsRenderer(
                         SettingId.MainBackFocusScheme,
                         "返回键焦点策略",
                         SettingsText.mainBackFocusSchemeText(prefs.mainBackFocusScheme),
+                        null,
+                    ),
+                    SettingEntry(SettingId.CustomPageEnabled, "自定义页", if (prefs.customPageConfig.enabled) "开" else "关", null),
+                    SettingEntry(
+                        SettingId.CustomPageContent,
+                        "自定义页内容",
+                        SettingsText.customPageContentText(prefs.customPageConfig),
                         null,
                     ),
                     SettingEntry(

@@ -73,6 +73,17 @@ class AppPrefs(context: Context) {
             prefs.edit().putString(KEY_STARTUP_PAGE, v).apply()
         }
 
+    var customPageConfig: CustomPageConfig
+        get() = CustomPageConfigStore.parse(prefs.getString(KEY_CUSTOM_PAGE_CONFIG, null))
+        set(value) {
+            val normalized = CustomPageConfigStore.normalize(value)
+            if (!normalized.enabled && normalized.tabs.isEmpty()) {
+                prefs.edit().remove(KEY_CUSTOM_PAGE_CONFIG).apply()
+            } else {
+                prefs.edit().putString(KEY_CUSTOM_PAGE_CONFIG, CustomPageConfigStore.serialize(normalized)).apply()
+            }
+        }
+
     var followingListOrder: String
         get() {
             val raw = prefs.getString(KEY_FOLLOWING_LIST_ORDER, FOLLOWING_LIST_ORDER_FOLLOW_TIME) ?: FOLLOWING_LIST_ORDER_FOLLOW_TIME
@@ -780,6 +791,7 @@ class AppPrefs(context: Context) {
         const val STARTUP_PAGE_DYNAMIC = "dynamic"
         const val STARTUP_PAGE_LIVE = "live"
         const val STARTUP_PAGE_MY = "my"
+        const val STARTUP_PAGE_CUSTOM = "custom"
 
         const val SIDEBAR_SIZE_SMALL = "small"
         const val SIDEBAR_SIZE_MEDIUM = "medium"
@@ -816,6 +828,7 @@ class AppPrefs(context: Context) {
         private const val KEY_UI_SCALE_FACTOR = "ui_scale_factor"
         private const val KEY_THEME_PRESET = "theme_preset"
         private const val KEY_STARTUP_PAGE = "startup_page"
+        private const val KEY_CUSTOM_PAGE_CONFIG = "custom_page_config"
         private const val KEY_FOLLOWING_LIST_ORDER = "following_list_order"
         private const val KEY_DYNAMIC_FOLLOWING_RECENT_UPDATE_DOT_ENABLED = "dynamic_following_recent_update_dot_enabled"
         private const val KEY_IMAGE_QUALITY = "image_quality"
