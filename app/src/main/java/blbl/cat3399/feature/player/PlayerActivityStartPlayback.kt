@@ -21,6 +21,7 @@ import blbl.cat3399.feature.player.engine.PlaybackSource
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineExceptionHandler
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -31,6 +32,30 @@ import java.util.concurrent.atomic.AtomicBoolean
 
 private const val RISK_CONTROL_USER_HINT = "当前账号可能被风控,请尽量联系开发者!"
 private val riskControlUserHintShown = AtomicBoolean(false)
+
+private suspend fun <T> runSuspendCatchingNonCancellation(block: suspend () -> T): Result<T> =
+    try {
+        Result.success(block())
+    } catch (throwable: Throwable) {
+        if (throwable is CancellationException) throw throwable
+        Result.failure(throwable)
+    }
+
+private fun PlayerActivity.startPlaybackFailureMessage(throwable: Throwable): String {
+    val apiError = throwable as? BiliApiException
+    return when {
+        apiError?.apiCode == -404 -> "当前视频暂时无法播放（接口返回 -404）"
+        !throwable.message.isNullOrBlank() -> "加载播放信息失败：${throwable.message}"
+        else -> "加载播放信息失败：未知错误"
+    }
+}
+
+private fun PlayerActivity.finishAfterStartPlaybackFailure(throwable: Throwable) {
+    if (!handlePlayUrlErrorIfNeeded(throwable)) {
+        AppToast.showLong(this, startPlaybackFailureMessage(throwable))
+    }
+    if (!isFinishing) finish()
+}
 
 internal fun PlayerActivity.resetPlaybackStateForNewMedia(
     engine: BlblPlayerEngine,
@@ -238,6 +263,7 @@ internal fun PlayerActivity.startPlayback(
 
     loadJob =
         lifecycleScope.launch(handler) {
+            val startupJobs = mutableListOf<Job>()
             try {
                 trace?.log("view:start")
                 val viewJson =
@@ -310,27 +336,29 @@ internal fun PlayerActivity.startPlayback(
 
                 val playJob =
                     async {
-                        val (qn, fnval) = playUrlParamsForSession()
-                        trace?.log("playurl:start", "qn=$qn fnval=$fnval")
-                        playbackConstraints = PlaybackConstraints()
-                        decodeFallbackAttemptCount = 0
-                        lastPickedDash = null
-                        loadPlayableWithTryLookFallback(
-                            bvid = resolvedBvid,
-                            aid = currentAid,
-                            cid = cid,
-                            epId = currentEpId,
-                            qn = qn,
-                            fnval = fnval,
-                            constraints = playbackConstraints,
-                        ).also { trace?.log("playurl:done") }
-                    }
+                        runSuspendCatchingNonCancellation {
+                            val (qn, fnval) = playUrlParamsForSession()
+                            trace?.log("playurl:start", "qn=$qn fnval=$fnval")
+                            playbackConstraints = PlaybackConstraints()
+                            decodeFallbackAttemptCount = 0
+                            lastPickedDash = null
+                            loadPlayableWithTryLookFallback(
+                                bvid = resolvedBvid,
+                                aid = currentAid,
+                                cid = cid,
+                                epId = currentEpId,
+                                qn = qn,
+                                fnval = fnval,
+                                constraints = playbackConstraints,
+                            ).also { trace?.log("playurl:done") }
+                        }
+                    }.also(startupJobs::add)
                 val dmJob =
                     async(Dispatchers.IO) {
                         trace?.log("danmakuMeta:start")
                         prepareDanmakuMeta(cid, currentAid ?: aid, trace)
                             .also { trace?.log("danmakuMeta:done", "segTotal=${it.segmentTotal} segMs=${it.segmentSizeMs}") }
-                    }
+                    }.also(startupJobs::add)
 
                 val videoShotJob =
                     if (BiliClient.prefs.playerVideoShotPreviewSize != AppPrefs.PLAYER_VIDEOSHOT_PREVIEW_SIZE_OFF) {
@@ -350,6 +378,7 @@ internal fun PlayerActivity.startPlayback(
                                 trace?.log("videoShot:done", "ok=${result != null}")
                             }
                         }
+                            .also(startupJobs::add)
                     } else {
                         trace?.log("videoShot:skip", "reason=pref_off")
                         null
@@ -363,12 +392,13 @@ internal fun PlayerActivity.startPlayback(
                             prepareSubtitleConfig(viewData, resolvedBvid, cid, trace)
                                 .also { trace?.log("subtitle:done", "ok=${it != null}") }
                         }
+                            .also(startupJobs::add)
                     } else {
                         null
                     }
 
                 trace?.log("playurl:await")
-                val (playJson, playable) = playJob.await()
+                val (playJson, playable) = playJob.await().getOrThrow()
                 trace?.log("playurl:awaitDone")
                 showRiskControlBypassHintIfNeeded(playJson)
                 lastAvailableQns = parseDashVideoQnList(playJson)
@@ -389,6 +419,7 @@ internal fun PlayerActivity.startPlayback(
 
                 trace?.log("player:setSource:start", "kind=${engine.kind.prefValue}")
                 if (engine.kind == PlayerEngineKind.IjkPlayer && playable !is Playable.Dash) {
+                    startupJobs.forEach { it.cancel() }
                     AppToast.showLong(this@startPlayback, "IjkPlayer 内核仅支持 DASH（音视频分离）流，请切回 ExoPlayer")
                     return@launch
                 }
@@ -396,6 +427,7 @@ internal fun PlayerActivity.startPlayback(
                     is Playable.Dash -> {
                         if (engine.kind == PlayerEngineKind.IjkPlayer) {
                             if (playable.videoTrackInfo.segmentBase == null || playable.audioTrackInfo.segmentBase == null) {
+                                startupJobs.forEach { it.cancel() }
                                 AppToast.showLong(this@startPlayback, "IjkPlayer 播放 DASH 需要 segment_base（initialization/index_range），当前流缺失，请切回 ExoPlayer")
                                 return@launch
                             }
@@ -464,10 +496,9 @@ internal fun PlayerActivity.startPlayback(
                 requestDanmakuSegmentsForPosition(engine.currentPosition.coerceAtLeast(0L), immediate = true)
             } catch (throwable: Throwable) {
                 if (throwable is CancellationException) return@launch
+                startupJobs.forEach { it.cancel() }
                 AppLog.e("Player", "start failed", throwable)
-                if (!handlePlayUrlErrorIfNeeded(throwable)) {
-                    AppToast.showLong(this@startPlayback, "加载播放信息失败：${throwable.message}")
-                }
+                finishAfterStartPlaybackFailure(throwable)
             }
         }
 }
