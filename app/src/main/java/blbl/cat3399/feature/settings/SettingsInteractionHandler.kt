@@ -601,6 +601,7 @@ class SettingsInteractionHandler(
                 JSONObject()
                     .put("ipv4_only_enabled", prefs.ipv4OnlyEnabled)
                     .put("user_agent", prefs.userAgent)
+                    .put("auto_skip_server_base_url", prefs.playerAutoSkipServerBaseUrl)
                     .put("player_cdn_preference", prefs.playerCdnPreference),
             )
             .put(
@@ -1238,6 +1239,10 @@ class SettingsInteractionHandler(
             SettingId.PlayerAutoSkipSegmentsEnabled -> {
                 prefs.playerAutoSkipSegmentsEnabled = !prefs.playerAutoSkipSegmentsEnabled
                 renderer.refreshSection(entry.id)
+            }
+
+            SettingId.PlayerAutoSkipServerBaseUrl -> {
+                showPlayerAutoSkipServerBaseUrlDialog(state.currentSectionIndex, entry.id)
             }
 
             SettingId.PlayerOpenDetailBeforePlay -> {
@@ -2159,6 +2164,43 @@ class SettingsInteractionHandler(
             onNeutral = {
                 prefs.userAgent = blbl.cat3399.core.prefs.AppPrefs.DEFAULT_UA
                 AppToast.show(activity, "已重置 User-Agent")
+                renderer.showSection(sectionIndex, focusId = focusId)
+            },
+        )
+    }
+
+    private fun showPlayerAutoSkipServerBaseUrlDialog(sectionIndex: Int, focusId: SettingId) {
+        val prefs = BiliClient.prefs
+        AppPopup.input(
+            context = activity,
+            title = "空降助手服务器地址",
+            initial = prefs.playerAutoSkipServerBaseUrl,
+            hint = "例如 https://bsbsb.top",
+            inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI,
+            minLines = 1,
+            positiveText = "保存",
+            negativeText = "取消",
+            neutralText = "重置默认",
+            validate = { text ->
+                val normalized = AppPrefs.normalizePlayerAutoSkipServerBaseUrl(text)
+                if (normalized == null) {
+                    AppToast.show(activity, "请输入有效的 http:// 或 https:// 地址")
+                    false
+                } else {
+                    true
+                }
+            },
+            onPositive = { text ->
+                val url = AppPrefs.normalizePlayerAutoSkipServerBaseUrl(text) ?: return@input
+                prefs.playerAutoSkipServerBaseUrl = url
+                evictNetworkConnections()
+                AppToast.show(activity, "已更新空降助手服务器地址")
+                renderer.showSection(sectionIndex, focusId = focusId)
+            },
+            onNeutral = {
+                prefs.playerAutoSkipServerBaseUrl = AppPrefs.DEFAULT_PLAYER_AUTO_SKIP_SERVER_BASE_URL
+                evictNetworkConnections()
+                AppToast.show(activity, "已重置空降助手服务器地址")
                 renderer.showSection(sectionIndex, focusId = focusId)
             },
         )

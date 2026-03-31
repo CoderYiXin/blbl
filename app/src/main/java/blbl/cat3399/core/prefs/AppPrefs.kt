@@ -2,6 +2,7 @@ package blbl.cat3399.core.prefs
 
 import android.content.Context
 import android.provider.Settings
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -431,6 +432,19 @@ class AppPrefs(context: Context) {
     var playerAutoSkipSegmentsEnabled: Boolean
         get() = prefs.getBoolean(KEY_PLAYER_AUTO_SKIP_SEGMENTS_ENABLED, false)
         set(value) = prefs.edit().putBoolean(KEY_PLAYER_AUTO_SKIP_SEGMENTS_ENABLED, value).apply()
+
+    var playerAutoSkipServerBaseUrl: String
+        get() =
+            normalizePlayerAutoSkipServerBaseUrl(prefs.getString(KEY_PLAYER_AUTO_SKIP_SERVER_BASE_URL, null))
+                ?: DEFAULT_PLAYER_AUTO_SKIP_SERVER_BASE_URL
+        set(value) {
+            val normalized = normalizePlayerAutoSkipServerBaseUrl(value) ?: DEFAULT_PLAYER_AUTO_SKIP_SERVER_BASE_URL
+            if (normalized == DEFAULT_PLAYER_AUTO_SKIP_SERVER_BASE_URL) {
+                prefs.edit().remove(KEY_PLAYER_AUTO_SKIP_SERVER_BASE_URL).apply()
+            } else {
+                prefs.edit().putString(KEY_PLAYER_AUTO_SKIP_SERVER_BASE_URL, normalized).apply()
+            }
+        }
 
     var playerOpenDetailBeforePlay: Boolean
         get() = prefs.getBoolean(KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY, false)
@@ -866,6 +880,7 @@ class AppPrefs(context: Context) {
         private const val KEY_PLAYER_HOLD_SEEK_MODE = "player_hold_seek_mode"
         private const val KEY_PLAYER_AUTO_RESUME_ENABLED = "player_auto_resume_enabled"
         private const val KEY_PLAYER_AUTO_SKIP_SEGMENTS_ENABLED = "player_auto_skip_segments_enabled"
+        private const val KEY_PLAYER_AUTO_SKIP_SERVER_BASE_URL = "player_auto_skip_server_base_url"
         private const val KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY = "player_open_detail_before_play"
         private const val KEY_FULLSCREEN = "fullscreen_enabled"
         private const val KEY_TAB_SWITCH_FOLLOWS_FOCUS = "tab_switch_follows_focus"
@@ -935,6 +950,9 @@ class AppPrefs(context: Context) {
         const val PLAYER_HOLD_SEEK_MODE_SCRUB = "scrub"
         const val PLAYER_HOLD_SEEK_MODE_SCRUB_FIXED_TIME = "scrub_fixed_time"
         const val PLAYER_HOLD_SEEK_SPEED_DEFAULT = 3.0f
+
+        const val DEFAULT_PLAYER_AUTO_SKIP_SERVER_BASE_URL = "https://bsbsb.top"
+        const val FALLBACK_PLAYER_AUTO_SKIP_SERVER_BASE_URL = "http://154.222.28.109"
 
         const val PLAYER_VIDEOSHOT_PREVIEW_SIZE_OFF = "off"
         const val PLAYER_VIDEOSHOT_PREVIEW_SIZE_SMALL = "small"
@@ -1018,6 +1036,13 @@ class AppPrefs(context: Context) {
                 UUID.fromString(text.trim())
                 true
             }.getOrDefault(false)
+        }
+
+        fun normalizePlayerAutoSkipServerBaseUrl(raw: String?): String? {
+            val value = raw?.trim()?.takeIf { it.isNotBlank() } ?: return null
+            val url = value.toHttpUrlOrNull() ?: return null
+            if (url.query != null || url.fragment != null) return null
+            return url.toString().trimEnd('/')
         }
     }
 

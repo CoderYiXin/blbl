@@ -3,11 +3,12 @@ package blbl.cat3399.core.api
 import blbl.cat3399.BuildConfig
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.prefs.AppPrefs
 import org.json.JSONArray
+import java.io.IOException
 
 object SponsorBlockApi {
     private const val TAG = "SponsorBlockApi"
-    private const val BASE_URL = "https://bsbsb.top"
     private const val PROJECT_URL = "https://github.com/cat3399/blbl"
     private const val ACTION_POI = "poi"
 
@@ -41,6 +42,11 @@ object SponsorBlockApi {
         val detail: String? = null,
     )
 
+    private data class RequestAttempt(
+        val result: FetchResult,
+        val isNetworkFailure: Boolean,
+    )
+
     suspend fun skipSegments(bvid: String, cid: Long): FetchResult {
         val safeBvid = bvid.trim()
         if (safeBvid.isBlank() || cid <= 0L) {
@@ -49,7 +55,7 @@ object SponsorBlockApi {
 
         val exact = querySkipSegments(bvid = safeBvid, cid = cid)
         if (exact.state == FetchState.SUCCESS && exact.segments.isNotEmpty()) {
-            return exact.withDetail("exact_cid").also { logResult(safeBvid, cid, it) }
+            return exact.annotate("exact_cid").also { logResult(safeBvid, cid, it) }
         }
 
         val fallback = querySkipSegments(bvid = safeBvid, cid = null)
@@ -58,18 +64,17 @@ object SponsorBlockApi {
                 FetchState.SUCCESS -> {
                     val picked = pickSegmentsForCid(fallback.segments, cid)
                     if (picked.isNotEmpty()) {
-                        FetchResult(state = FetchState.SUCCESS, segments = picked, detail = "fallback_no_cid")
+                        fallback.copy(segments = picked).annotate("fallback_no_cid")
                     } else {
-                        FetchResult(
-                            state = FetchState.NOT_FOUND,
-                            detail = if (fallback.segments.isEmpty()) "fallback_empty" else "fallback_cid_mismatch",
-                        )
+                        fallback
+                            .copy(state = FetchState.NOT_FOUND, segments = emptyList())
+                            .annotate(if (fallback.segments.isEmpty()) "fallback_empty" else "fallback_cid_mismatch")
                     }
                 }
 
                 FetchState.NOT_FOUND -> {
                     when (exact.state) {
-                        FetchState.SUCCESS -> FetchResult(state = FetchState.NOT_FOUND, detail = "exact_empty")
+                        FetchState.SUCCESS -> exact.copy(state = FetchState.NOT_FOUND, segments = emptyList()).annotate("exact_empty")
                         FetchState.NOT_FOUND -> FetchResult(state = FetchState.NOT_FOUND, detail = "not_found")
                         FetchState.ERROR -> FetchResult(state = FetchState.NOT_FOUND, detail = "fallback_not_found")
                     }
@@ -77,8 +82,8 @@ object SponsorBlockApi {
 
                 FetchState.ERROR -> {
                     when (exact.state) {
-                        FetchState.SUCCESS -> fallback.withDetail("${fallback.detail ?: "fallback_error"}; exact_empty")
-                        FetchState.NOT_FOUND -> fallback.withDetail("${fallback.detail ?: "fallback_error"}; exact_not_found")
+                        FetchState.SUCCESS -> fallback.annotate("exact_empty")
+                        FetchState.NOT_FOUND -> fallback.annotate("exact_not_found")
                         FetchState.ERROR -> {
                             val exactDetail = exact.detail ?: "exact_error"
                             val fallbackDetail = fallback.detail ?: "fallback_error"
@@ -92,16 +97,33 @@ object SponsorBlockApi {
     }
 
     private suspend fun querySkipSegments(bvid: String, cid: Long?): FetchResult {
-        val url =
-            buildString {
-                append(BASE_URL)
-                append("/api/skipSegments?videoID=")
-                append(bvid)
-                if (cid != null && cid > 0L) {
-                    append("&cid=")
-                    append(cid)
-                }
-            }
+        val primaryBaseUrl = BiliClient.prefs.playerAutoSkipServerBaseUrl
+        val primary = querySkipSegmentsOnce(baseUrl = primaryBaseUrl, bvid = bvid, cid = cid)
+        if (!primary.isNetworkFailure || primaryBaseUrl == AppPrefs.FALLBACK_PLAYER_AUTO_SKIP_SERVER_BASE_URL) {
+            return primary.result
+        }
+
+        AppLog.w(
+            TAG,
+            "skipSegments primary network failure, retry fallback base=${AppPrefs.FALLBACK_PLAYER_AUTO_SKIP_SERVER_BASE_URL} " +
+                "bvid=$bvid ${requestScopeLabel(cid)} detail=${primary.result.detail.orEmpty()}",
+        )
+        val fallback =
+            querySkipSegmentsOnce(
+                baseUrl = AppPrefs.FALLBACK_PLAYER_AUTO_SKIP_SERVER_BASE_URL,
+                bvid = bvid,
+                cid = cid,
+            )
+        if (fallback.isNetworkFailure) {
+            val primaryDetail = primary.result.detail ?: "primary_network_error"
+            val fallbackDetail = fallback.result.detail ?: "fallback_network_error"
+            return FetchResult(state = FetchState.ERROR, detail = "primary=$primaryDetail; retry=$fallbackDetail")
+        }
+        return fallback.result.annotate("retry_fallback_ip")
+    }
+
+    private suspend fun querySkipSegmentsOnce(baseUrl: String, bvid: String, cid: Long?): RequestAttempt {
+        val url = buildSkipSegmentsUrl(baseUrl = baseUrl, bvid = bvid, cid = cid)
         return runCatching {
             BiliClient.requestStringResponse(
                 url = url,
@@ -111,36 +133,51 @@ object SponsorBlockApi {
             )
         }.fold(
             onSuccess = { response ->
-                when {
-                    response.code == 404 -> FetchResult(state = FetchState.NOT_FOUND, detail = requestScopeLabel(cid))
-                    !response.isSuccessful -> FetchResult(
-                        state = FetchState.ERROR,
-                        detail = "${requestScopeLabel(cid)} http_${response.code}",
-                    )
-                    else -> {
-                        runCatching { parseSkipSegments(response.body) }
-                            .fold(
-                                onSuccess = { parsed ->
-                                    FetchResult(
-                                        state = FetchState.SUCCESS,
-                                        segments = parsed,
-                                        detail = requestScopeLabel(cid),
+                RequestAttempt(
+                    result =
+                        when {
+                            response.code == 404 ->
+                                FetchResult(
+                                    state = FetchState.NOT_FOUND,
+                                    detail = requestDetail(cid = cid, baseUrl = baseUrl),
+                                )
+
+                            !response.isSuccessful ->
+                                FetchResult(
+                                    state = FetchState.ERROR,
+                                    detail = "${requestDetail(cid = cid, baseUrl = baseUrl)} http_${response.code}",
+                                )
+
+                            else -> {
+                                runCatching { parseSkipSegments(response.body) }
+                                    .fold(
+                                        onSuccess = { parsed ->
+                                            FetchResult(
+                                                state = FetchState.SUCCESS,
+                                                segments = parsed,
+                                                detail = requestDetail(cid = cid, baseUrl = baseUrl),
+                                            )
+                                        },
+                                        onFailure = { t ->
+                                            FetchResult(
+                                                state = FetchState.ERROR,
+                                                detail = "${requestDetail(cid = cid, baseUrl = baseUrl)} parse:${t.message.orEmpty()}",
+                                            )
+                                        },
                                     )
-                                },
-                                onFailure = { t ->
-                                    FetchResult(
-                                        state = FetchState.ERROR,
-                                        detail = "${requestScopeLabel(cid)} parse:${t.message.orEmpty()}",
-                                    )
-                                },
-                            )
-                    }
-                }
+                            }
+                        },
+                    isNetworkFailure = false,
+                )
             },
             onFailure = { t ->
-                FetchResult(
-                    state = FetchState.ERROR,
-                    detail = "${requestScopeLabel(cid)} ${t.javaClass.simpleName}:${t.message.orEmpty()}",
+                RequestAttempt(
+                    result =
+                        FetchResult(
+                            state = FetchState.ERROR,
+                            detail = "${requestDetail(cid = cid, baseUrl = baseUrl)} ${t.javaClass.simpleName}:${t.message.orEmpty()}",
+                        ),
+                    isNetworkFailure = isRetryableNetworkFailure(t),
                 )
             },
         )
@@ -153,7 +190,26 @@ object SponsorBlockApi {
 
     private fun requestScopeLabel(cid: Long?): String = if (cid != null && cid > 0L) "cid=$cid" else "cid=all"
 
-    private fun FetchResult.withDetail(detail: String): FetchResult = copy(detail = detail)
+    private fun requestDetail(cid: Long?, baseUrl: String): String = "${requestScopeLabel(cid)} base=$baseUrl"
+
+    private fun FetchResult.annotate(label: String): FetchResult {
+        if (label.isBlank()) return this
+        val detailText = detail?.takeIf { it.isNotBlank() }
+        return copy(detail = if (detailText == null) label else "$label; $detailText")
+    }
+
+    private fun buildSkipSegmentsUrl(baseUrl: String, bvid: String, cid: Long?): String =
+        buildString {
+            append(baseUrl)
+            append("/api/skipSegments?videoID=")
+            append(bvid)
+            if (cid != null && cid > 0L) {
+                append("&cid=")
+                append(cid)
+            }
+        }
+
+    private fun isRetryableNetworkFailure(t: Throwable): Boolean = t is IOException
 
     internal fun sponsorBlockRequestHeaders(): Map<String, String> =
         mapOf(

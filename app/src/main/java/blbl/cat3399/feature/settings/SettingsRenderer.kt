@@ -258,6 +258,12 @@ class SettingsRenderer(
                         if (prefs.playerAutoSkipSegmentsEnabled) "开" else "关",
                         null,
                     ),
+                    SettingEntry(
+                        SettingId.PlayerAutoSkipServerBaseUrl,
+                        "空降助手服务器地址",
+                        prefs.playerAutoSkipServerBaseUrl,
+                        null,
+                    ),
                     SettingEntry(SettingId.PlayerOpenDetailBeforePlay, "播放前打开详情页", if (prefs.playerOpenDetailBeforePlay) "开" else "关", null),
                     SettingEntry(SettingId.PlayerPlaybackMode, "播放模式", SettingsText.playbackModeText(prefs.playerPlaybackMode), null),
                     SettingEntry(SettingId.SubtitlePreferredLang, "字幕语言", SettingsText.subtitleLangText(prefs.subtitlePreferredLang), null),

@@ -41,6 +41,7 @@ enum class SettingId(
     PlayerHoldSeekMode("player_hold_seek_mode"),
     PlayerAutoResumeEnabled("player_auto_resume_enabled"),
     PlayerAutoSkipSegmentsEnabled("player_auto_skip_segments_enabled"),
+    PlayerAutoSkipServerBaseUrl("player_auto_skip_server_base_url"),
     PlayerOpenDetailBeforePlay("player_open_detail_before_play"),
     PlayerPlaybackMode("player_playback_mode"),
     SubtitlePreferredLang("subtitle_preferred_lang"),
