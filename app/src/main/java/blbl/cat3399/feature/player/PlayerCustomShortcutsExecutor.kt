@@ -41,6 +41,11 @@ private fun audioIdHintText(id: Int): String = if (id > 0) audioLabel(id) else "
 
 private fun qnHintText(qn: Int): String = if (qn > 0) qnLabel(qn) else "默认"
 
+private fun PlayerActivity.showShortcutOsd() {
+    setControlsVisible(true)
+    focusDownKeyOsdTargetControl()
+}
+
 internal fun PlayerActivity.dispatchPlayerCustomShortcutIfNeeded(event: KeyEvent): Boolean {
     if (event.action != KeyEvent.ACTION_DOWN) return false
     if (event.repeatCount != 0) return false
@@ -79,6 +84,10 @@ private fun PlayerActivity.applyPlayerCustomShortcut(keyCode: Int, action: Playe
 
         PlayerCustomShortcutAction.OpenSettings -> {
             showSettingsPanel()
+        }
+
+        PlayerCustomShortcutAction.ShowOsd -> {
+            showShortcutOsd()
         }
 
         PlayerCustomShortcutAction.TogglePlayPause -> {

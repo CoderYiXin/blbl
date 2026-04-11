@@ -29,6 +29,7 @@ internal object PlayerCustomShortcutCatalog {
             PlayerCustomShortcutActionOption(PlayerCustomShortcutAction.TYPE_OPEN_VIDEO_LIST, "打开视频列表", requiresValue = true),
             PlayerCustomShortcutActionOption(PlayerCustomShortcutAction.TYPE_OPEN_COMMENTS, "打开评论", requiresValue = false),
             PlayerCustomShortcutActionOption(PlayerCustomShortcutAction.TYPE_OPEN_SETTINGS, "打开设置", requiresValue = false),
+            PlayerCustomShortcutActionOption(PlayerCustomShortcutAction.TYPE_SHOW_OSD, "呼出 OSD", requiresValue = false),
             PlayerCustomShortcutActionOption(PlayerCustomShortcutAction.TYPE_TOGGLE_PLAY_PAUSE, "播放/暂停", requiresValue = false),
             PlayerCustomShortcutActionOption(PlayerCustomShortcutAction.TYPE_PLAY_PREVIOUS, "上一个", requiresValue = false),
             PlayerCustomShortcutActionOption(PlayerCustomShortcutAction.TYPE_PLAY_NEXT, "下一个", requiresValue = false),
@@ -64,6 +65,7 @@ internal object PlayerCustomShortcutCatalog {
         return when (type) {
             PlayerCustomShortcutAction.TYPE_OPEN_COMMENTS -> PlayerCustomShortcutAction.OpenComments
             PlayerCustomShortcutAction.TYPE_OPEN_SETTINGS -> PlayerCustomShortcutAction.OpenSettings
+            PlayerCustomShortcutAction.TYPE_SHOW_OSD -> PlayerCustomShortcutAction.ShowOsd
             PlayerCustomShortcutAction.TYPE_TOGGLE_PLAY_PAUSE -> PlayerCustomShortcutAction.TogglePlayPause
             PlayerCustomShortcutAction.TYPE_PLAY_PREVIOUS -> PlayerCustomShortcutAction.PlayPrevious
             PlayerCustomShortcutAction.TYPE_PLAY_NEXT -> PlayerCustomShortcutAction.PlayNext
@@ -85,6 +87,7 @@ internal object PlayerCustomShortcutCatalog {
             is PlayerCustomShortcutAction.OpenVideoList -> "打开视频列表：${openVideoListTargetText(action.target)}"
             PlayerCustomShortcutAction.OpenComments -> "打开评论"
             PlayerCustomShortcutAction.OpenSettings -> "打开设置"
+            PlayerCustomShortcutAction.ShowOsd -> "呼出 OSD"
             PlayerCustomShortcutAction.TogglePlayPause -> "播放/暂停"
             PlayerCustomShortcutAction.PlayPrevious -> "上一个"
             PlayerCustomShortcutAction.PlayNext -> "下一个"

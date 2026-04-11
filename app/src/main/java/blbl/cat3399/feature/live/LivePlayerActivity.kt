@@ -672,6 +672,13 @@ class LivePlayerActivity : BaseActivity() {
         val binding = BiliClient.prefs.playerCustomShortcuts.firstOrNull { it.keyCode == keyCode } ?: return false
 
         when (val action = binding.action) {
+            PlayerCustomShortcutAction.ShowOsd -> {
+                noteUserInteraction()
+                setControlsVisible(true)
+                focusFirstControl()
+                return true
+            }
+
             PlayerCustomShortcutAction.ToggleDanmaku -> {
                 noteUserInteraction()
                 session = session.copy(danmaku = session.danmaku.copy(enabled = !session.danmaku.enabled))

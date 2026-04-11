@@ -36,6 +36,8 @@ internal sealed class PlayerCustomShortcutAction(
 
     object OpenSettings : PlayerCustomShortcutAction(TYPE_OPEN_SETTINGS)
 
+    object ShowOsd : PlayerCustomShortcutAction(TYPE_SHOW_OSD)
+
     object TogglePlayPause : PlayerCustomShortcutAction(TYPE_TOGGLE_PLAY_PAUSE)
 
     object PlayPrevious : PlayerCustomShortcutAction(TYPE_PLAY_PREVIOUS)
@@ -111,6 +113,7 @@ internal sealed class PlayerCustomShortcutAction(
         const val TYPE_OPEN_VIDEO_LIST = "open_video_list"
         const val TYPE_OPEN_COMMENTS = "open_comments"
         const val TYPE_OPEN_SETTINGS = "open_settings"
+        const val TYPE_SHOW_OSD = "show_osd"
         const val TYPE_TOGGLE_PLAY_PAUSE = "toggle_play_pause"
         const val TYPE_PLAY_PREVIOUS = "play_previous"
         const val TYPE_PLAY_NEXT = "play_next"
@@ -247,6 +250,7 @@ internal object PlayerCustomShortcutsStore {
             }
             PlayerCustomShortcutAction.TYPE_OPEN_COMMENTS -> PlayerCustomShortcutAction.OpenComments
             PlayerCustomShortcutAction.TYPE_OPEN_SETTINGS -> PlayerCustomShortcutAction.OpenSettings
+            PlayerCustomShortcutAction.TYPE_SHOW_OSD -> PlayerCustomShortcutAction.ShowOsd
             PlayerCustomShortcutAction.TYPE_TOGGLE_PLAY_PAUSE -> PlayerCustomShortcutAction.TogglePlayPause
             PlayerCustomShortcutAction.TYPE_PLAY_PREVIOUS -> PlayerCustomShortcutAction.PlayPrevious
             PlayerCustomShortcutAction.TYPE_PLAY_NEXT -> PlayerCustomShortcutAction.PlayNext
@@ -352,6 +356,7 @@ internal object PlayerCustomShortcutsStore {
 
             PlayerCustomShortcutAction.OpenComments,
             PlayerCustomShortcutAction.OpenSettings,
+            PlayerCustomShortcutAction.ShowOsd,
             PlayerCustomShortcutAction.TogglePlayPause,
             PlayerCustomShortcutAction.PlayPrevious,
             PlayerCustomShortcutAction.PlayNext,
