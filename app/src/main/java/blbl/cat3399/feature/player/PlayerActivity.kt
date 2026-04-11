@@ -1754,14 +1754,13 @@ class PlayerActivity : BaseActivity() {
                 }
 
                 if (event.repeatCount > 0) {
-                    showSeekOsd()
                     clearKeySeekPending()
                     // Long-press LEFT: always do preview-scrub rewind.
                     startHoldScrub(direction = -1, showControls = false)
                     return true
                 }
 
-                showSeekOsd()
+                if (holdSeekUsesProgressPreview(direction = -1)) showSeekOsd()
                 beginKeySeekPending(keyCode = keyCode, direction = -1, showControls = false)
                 return true
             }
@@ -1779,13 +1778,12 @@ class PlayerActivity : BaseActivity() {
                 }
 
                 if (event.repeatCount > 0) {
-                    showSeekOsd()
                     clearKeySeekPending()
                     startHoldSeek(direction = +1, showControls = false)
                     return true
                 }
 
-                showSeekOsd()
+                if (holdSeekUsesProgressPreview(direction = +1)) showSeekOsd()
                 beginKeySeekPending(keyCode = keyCode, direction = +1, showControls = false)
                 return true
             }
