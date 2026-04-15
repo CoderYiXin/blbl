@@ -259,6 +259,7 @@ internal fun PlayerActivity.hideBottomCardPanel(restoreFocus: Boolean) {
 }
 
 internal fun PlayerActivity.notifyPartsListPanelChanged() {
+    refreshPlayerInfoPanelContent()
     if (!isBottomCardPanelVisible()) return
     if (bottomCardPanelKind != PlayerVideoListKind.PARTS) return
     refreshBottomCardPanelContent(requestFocus = shouldRequestBottomPanelContentFocusAfterAsyncUpdate(kind = PlayerVideoListKind.PARTS))
@@ -363,6 +364,7 @@ private fun PlayerActivity.ensureRecommendCardsLoaded() {
                 }
             } finally {
                 if (token == relatedVideosFetchToken) relatedVideosFetchJob = null
+                if (currentBvid.trim() == requestBvid) refreshPlayerInfoPanelContent()
                 if (isBottomCardPanelVisible() && bottomCardPanelKind == PlayerVideoListKind.RECOMMEND && currentBvid.trim() == requestBvid) {
                     refreshBottomCardPanelContent(requestFocus = shouldRequestBottomPanelContentFocusAfterAsyncUpdate(kind = PlayerVideoListKind.RECOMMEND))
                 }

@@ -1464,6 +1464,24 @@ class SettingsInteractionHandler(
                 }
             }
 
+            SettingId.PlayerStyle -> {
+                val options =
+                    listOf(
+                        AppPrefs.PLAYER_STYLE_FULLSCREEN to "全屏",
+                        AppPrefs.PLAYER_STYLE_HD to "HD",
+                    )
+                val checked = options.indexOfFirst { it.first == prefs.playerStyle }.coerceAtLeast(0)
+                showChoiceDialog(
+                    title = SettingsText.playerStyleTitle(),
+                    items = options.map { it.second },
+                    checkedIndex = checked,
+                ) { selected ->
+                    val value = options.firstOrNull { it.second == selected }?.first ?: AppPrefs.PLAYER_STYLE_FULLSCREEN
+                    prefs.playerStyle = value
+                    renderer.refreshSection(entry.id)
+                }
+            }
+
             SettingId.ProjectUrl -> showProjectDialog()
 
             SettingId.QqGroup -> {

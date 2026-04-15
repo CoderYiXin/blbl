@@ -125,6 +125,7 @@ internal fun PlayerActivity.resetPlaybackStateForNewMedia(
     relatedVideosFetchJob = null
     relatedVideosFetchToken++
     relatedVideosCache = null
+    resetPlayerInfoPanelState()
 
     commentsFetchJob?.cancel()
     commentsFetchJob = null
@@ -157,6 +158,7 @@ internal fun PlayerActivity.resetPlaybackStateForNewMedia(
 
     binding.settingsPanel.visibility = View.GONE
     binding.commentsPanel.visibility = View.GONE
+    binding.playerInfoPanel.visibility = View.GONE
     hideBottomCardPanel(restoreFocus = false)
     binding.recyclerComments.visibility = View.VISIBLE
     binding.recyclerCommentThread.visibility = View.GONE
@@ -315,6 +317,7 @@ internal fun PlayerActivity.startPlayback(
                 currentViewDurationMs = viewData.optLong("duration", -1L).takeIf { it > 0 }?.times(1000L)
                 applyUpInfo(viewData)
                 applyTitleMeta(viewData)
+                applyPlayerInfoViewData(viewData)
 
                 val resolvedBvid =
                     viewData.optString("bvid", "").trim().takeIf { it.isNotBlank() }
@@ -338,6 +341,8 @@ internal fun PlayerActivity.startPlayback(
                     updatePageListIndexForCurrentMedia(bvid = resolvedBvid, aid = currentAid, cid = cid)
                 }
                 updatePlaylistControls()
+                refreshPlayerInfoPanelContent()
+                syncPlayerInfoPanelVisibility()
 
                 requestOnlineWatchingText(bvid = resolvedBvid, cid = cid)
                 applyPerVideoPreferredQn(viewData, cid = cid)

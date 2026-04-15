@@ -51,6 +51,7 @@ internal fun PlayerActivity.updateActionButtonsUi() {
     updateLikeButtonUi()
     updateCoinButtonUi()
     updateFavButtonUi()
+    updatePlayerInfoActionUi()
 }
 
 internal fun PlayerActivity.updateLikeButtonUi() {
@@ -170,6 +171,10 @@ internal fun PlayerActivity.onLikeButtonClicked(showControls: Boolean = true) {
                 updateLikeButtonUi()
                 BiliApi.archiveLike(bvid = requestBvid, aid = currentAid, like = targetLike)
                 if (currentBvid != requestBvid) return@launch
+                currentPlayerLikeCount =
+                    currentPlayerLikeCount?.let { count ->
+                        if (targetLike) count + 1 else (count - 1).coerceAtLeast(0L)
+                    }
                 actionLiked = targetLike
                 AppToast.show(this@onLikeButtonClicked, if (targetLike) "点赞成功" else "已取消赞")
             } catch (t: Throwable) {
@@ -203,6 +208,7 @@ internal fun PlayerActivity.onCoinButtonClicked(showControls: Boolean = true) {
                 updateCoinButtonUi()
                 BiliApi.coinAdd(bvid = requestBvid, aid = currentAid, multiply = 1, selectLike = false)
                 if (currentBvid != requestBvid) return@launch
+                currentPlayerCoinCount = currentPlayerCoinCount?.let { it + 1L }
                 actionCoinCount = (actionCoinCount + 1).coerceAtMost(2)
                 AppToast.show(this@onCoinButtonClicked, "投币成功")
             } catch (t: Throwable) {
@@ -316,7 +322,13 @@ internal fun PlayerActivity.applyFavSelection(
             try {
                 updateFavButtonUi()
                 BiliApi.favResourceDeal(rid = rid, addMediaIds = add, delMediaIds = del)
+                val wasFavored = actionFavored
                 actionFavored = selected.isNotEmpty()
+                if (!wasFavored && actionFavored) {
+                    currentPlayerFavCount = currentPlayerFavCount?.let { it + 1L }
+                } else if (wasFavored && !actionFavored) {
+                    currentPlayerFavCount = currentPlayerFavCount?.let { (it - 1L).coerceAtLeast(0L) }
+                }
                 updateFavButtonUi()
                 AppToast.show(this@applyFavSelection, "收藏已更新")
             } catch (t: Throwable) {
@@ -451,6 +463,7 @@ internal fun PlayerActivity.playRecommendedNext(userInitiated: Boolean) {
                 if (currentBvid.trim() != requestBvid) return@launch
 
                 relatedVideosCache = PlayerActivity.RelatedVideosCache(bvid = requestBvid, items = list)
+                refreshPlayerInfoPanelContent()
                 val picked = pickRecommendedVideo(list, excludeBvid = requestBvid)
                 if (picked == null) {
                     if (userInitiated) AppToast.show(this@playRecommendedNext, "暂无推荐视频")

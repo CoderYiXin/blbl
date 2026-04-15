@@ -68,6 +68,7 @@ internal fun PlayerActivity.setControlsVisible(visible: Boolean) {
         binding.videoShotPreview.visibility = View.GONE
         videoShotFetchJob?.cancel()
     }
+    syncPlayerInfoPanelVisibility()
     updatePersistentBottomProgressBarVisibility()
     onTouchOverlayStateChanged()
     if (visible) noteUserInteraction() else autoHideJob?.cancel()
@@ -246,6 +247,7 @@ internal fun PlayerActivity.hasControlsFocus(): Boolean =
     binding.topBar.hasFocus() ||
         binding.cardUpQuick.hasFocus() ||
         binding.bottomBar.hasFocus() ||
+        binding.playerInfoPanel.hasFocus() ||
         binding.settingsPanel.hasFocus() ||
         binding.commentsPanel.hasFocus()
 

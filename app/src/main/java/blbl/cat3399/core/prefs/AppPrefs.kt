@@ -330,6 +330,28 @@ class AppPrefs(context: Context) {
             prefs.edit().putString(KEY_PLAYER_ENGINE_KIND, normalized).apply()
         }
 
+    var playerStyle: String
+        get() {
+            val raw = prefs.getString(KEY_PLAYER_STYLE, PLAYER_STYLE_FULLSCREEN) ?: PLAYER_STYLE_FULLSCREEN
+            val v = raw.trim()
+            return when (v) {
+                PLAYER_STYLE_FULLSCREEN,
+                PLAYER_STYLE_HD,
+                -> v
+
+                else -> PLAYER_STYLE_FULLSCREEN
+            }
+        }
+        set(value) {
+            val v = value.trim()
+            val normalized =
+                when (v) {
+                    PLAYER_STYLE_HD -> PLAYER_STYLE_HD
+                    else -> PLAYER_STYLE_FULLSCREEN
+                }
+            prefs.edit().putString(KEY_PLAYER_STYLE, normalized).apply()
+        }
+
     var playerPreferredAudioId: Int
         get() = prefs.getInt(KEY_PLAYER_AUDIO_ID, 30280)
         set(value) = prefs.edit().putInt(KEY_PLAYER_AUDIO_ID, value).apply()
@@ -896,6 +918,7 @@ class AppPrefs(context: Context) {
         private const val KEY_PLAYER_CODEC = "player_codec"
         private const val KEY_PLAYER_RENDER_VIEW = "player_render_view"
         private const val KEY_PLAYER_ENGINE_KIND = "player_engine_kind"
+        private const val KEY_PLAYER_STYLE = "player_style"
         private const val KEY_PLAYER_AUDIO_ID = "player_audio_id"
         private const val KEY_PLAYER_CDN_PREFERENCE = "player_cdn_preference"
         private const val KEY_LIVE_HIGH_BITRATE_ENABLED = "live_high_bitrate_enabled"
@@ -964,6 +987,9 @@ class AppPrefs(context: Context) {
 
         const val PLAYER_ENGINE_EXO = "exoplayer"
         const val PLAYER_ENGINE_IJK = "ijkplayer"
+
+        const val PLAYER_STYLE_FULLSCREEN = "fullscreen"
+        const val PLAYER_STYLE_HD = "hd"
 
         const val PLAYER_AUDIO_BALANCE_OFF = "off"
         const val PLAYER_AUDIO_BALANCE_LOW = "low"

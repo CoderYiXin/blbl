@@ -136,6 +136,14 @@ object SettingsText {
             else -> "中"
         }
 
+    fun playerStyleTitle(): String = "播放器样式"
+
+    fun playerStyleText(code: String): String =
+        when (code) {
+            blbl.cat3399.core.prefs.AppPrefs.PLAYER_STYLE_HD -> "HD"
+            else -> "全屏"
+        }
+
     fun renderViewText(code: String): String =
         when (code) {
             blbl.cat3399.core.prefs.AppPrefs.PLAYER_RENDER_VIEW_TEXTURE_VIEW -> "TextureView"

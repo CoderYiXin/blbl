@@ -196,6 +196,29 @@
     <dimen name="player_comments_hint_padding">16dp</dimen>
     <dimen name="player_comments_hint_text_size">14sp</dimen>
 
+    <dimen name="player_info_tab_text_size">18sp</dimen>
+    <dimen name="player_info_tab_gap">24dp</dimen>
+    <dimen name="player_info_avatar_size">42dp</dimen>
+    <dimen name="player_info_follow_min_width">76dp</dimen>
+    <dimen name="player_info_follow_padding_h">14dp</dimen>
+    <dimen name="player_info_follow_text_size">14sp</dimen>
+    <dimen name="player_info_up_name_text_size">17sp</dimen>
+    <dimen name="player_info_up_meta_text_size">12sp</dimen>
+    <dimen name="player_info_title_text_size">24sp</dimen>
+    <dimen name="player_info_stats_text_size">14sp</dimen>
+    <dimen name="player_info_desc_text_size">14sp</dimen>
+    <dimen name="player_info_section_title_text_size">16sp</dimen>
+    <dimen name="player_info_action_icon_size">18dp</dimen>
+    <dimen name="player_info_action_text_size">14sp</dimen>
+    <dimen name="player_info_action_padding_h">12dp</dimen>
+    <dimen name="player_info_action_padding_v">10dp</dimen>
+    <dimen name="player_info_recommend_row_gap">8dp</dimen>
+    <dimen name="player_info_recommend_item_padding">10dp</dimen>
+    <dimen name="player_info_recommend_cover_width">120dp</dimen>
+    <dimen name="player_info_recommend_cover_height">68dp</dimen>
+    <dimen name="player_info_shelf_card_width">138dp</dimen>
+    <dimen name="player_info_shelf_card_margin">4dp</dimen>
+
     <!-- Player: comment panel item -->
     <dimen name="player_comment_item_margin_bottom">4dp</dimen>
     <dimen name="player_comment_item_corner_radius">8dp</dimen>

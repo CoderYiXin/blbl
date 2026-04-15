@@ -243,6 +243,7 @@ internal fun PlayerActivity.showSettingsPanel() {
     setControlsVisible(true)
     binding.settingsPanel.visibility = View.VISIBLE
     showSettingsRoot(focusKey = PlayerSettingKeys.RESOLUTION)
+    syncPlayerInfoPanelVisibility()
 }
 
 internal fun PlayerActivity.hideSettingsPanel() {
@@ -251,6 +252,7 @@ internal fun PlayerActivity.hideSettingsPanel() {
     // (e.g. top bar back button) and causing a visible "double jump".
     sidePanelFocusReturn.restoreAndClear(fallback = binding.btnAdvanced, postOnFail = false)
     binding.settingsPanel.visibility = View.GONE
+    syncPlayerInfoPanelVisibility()
 }
 
 internal fun PlayerActivity.toggleCommentsPanel() {
@@ -273,6 +275,7 @@ internal fun PlayerActivity.showCommentsPanel() {
     showCommentsRoot()
     ensureCommentsLoaded()
     focusCommentsPanel()
+    syncPlayerInfoPanelVisibility()
 }
 
 internal fun PlayerActivity.hideCommentsPanel() {
@@ -284,6 +287,7 @@ internal fun PlayerActivity.hideCommentsPanel() {
     (binding.recyclerComments.adapter as? PlayerCommentsAdapter)?.invalidateSizing()
     (binding.recyclerCommentThread.adapter as? PlayerCommentsAdapter)?.invalidateSizing()
     binding.commentsPanel.visibility = View.GONE
+    syncPlayerInfoPanelVisibility()
 }
 
 internal fun PlayerActivity.onSidePanelBackPressed(): Boolean {

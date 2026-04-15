@@ -219,10 +219,19 @@ class PlayerActivity : BaseActivity() {
     internal var currentUpName: String? = null
     internal var currentUpAvatar: String? = null
     internal var currentUpFollowed: Boolean? = null
+    internal var currentPlayerDesc: String? = null
+    internal var currentPlayerViewCount: Long? = null
+    internal var currentPlayerDanmakuCount: Long? = null
+    internal var currentPlayerPubDateSec: Long? = null
+    internal var currentPlayerCommentCount: Long? = null
+    internal var currentPlayerLikeCount: Long? = null
+    internal var currentPlayerCoinCount: Long? = null
+    internal var currentPlayerFavCount: Long? = null
     internal var upFollowActionInFlight: Boolean = false
     internal var upFollowActionJob: Job? = null
     internal var upFollowStateJob: Job? = null
     internal var upFollowStateToken: Int = 0
+    internal var playerInfoShelfUsesRecommendFallback: Boolean = false
 
     internal var pageListToken: String? = null
     internal var pageListSource: String? = null
@@ -1055,6 +1064,7 @@ class PlayerActivity : BaseActivity() {
         )
         refreshSettings(settingsAdapter)
         updateDebugOverlay()
+        initPlayerInfoPanel()
         initSidePanels()
         initCommentImageViewer()
         initBottomCardPanel()
