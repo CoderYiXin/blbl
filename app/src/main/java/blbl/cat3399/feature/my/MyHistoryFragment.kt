@@ -182,6 +182,7 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
         super.onResume()
         (binding.recycler.layoutManager as? GridLayoutManager)?.spanCount = spanCountForWidth(resources)
         maybeTriggerInitialLoad()
+        silentRefreshForProgressDataSource()
         maybeConsumePendingFocusFirstItemFromTabSwitch()
     }
 
@@ -259,6 +260,18 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
         loadNextPage(isRefresh = true)
     }
 
+    private fun silentRefreshForProgressDataSource() {
+        val b = _binding ?: return
+        if (!initialLoadTriggered) return
+        if (adapter.itemCount <= 0) return
+        if (b.swipeRefresh.isRefreshing) return
+        if (paging.snapshot().isLoading) return
+        paging.reset()
+        loadedKeys.clear()
+        dpadGridController?.clearPendingFocusAfterLoadMore()
+        loadNextPage(isRefresh = true)
+    }
+
     private data class FetchedPage(
         val items: List<VideoCard>,
         val nextCursor: BiliApi.HistoryCursor?,
@@ -313,6 +326,9 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
 
                 val applied = result.appliedOrNull() ?: return@launch
                 if (applied.items.isEmpty()) {
+                    if (applied.isRefresh) {
+                        adapter.submit(emptyList())
+                    }
                     if (applied.isRefresh && pendingFocusFirstItemAfterRefresh) {
                         pendingFocusFirstItemAfterRefresh = false
                         _binding?.recycler?.postIfAlive(isAlive = { _binding != null && isResumed }) {

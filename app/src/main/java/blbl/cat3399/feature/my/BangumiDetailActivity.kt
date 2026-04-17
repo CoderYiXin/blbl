@@ -45,6 +45,7 @@ class BangumiDetailActivity : BaseActivity() {
 
     private var loadJob: Job? = null
     private var requestToken: Int = 0
+    private var hasLoadedDetailOnce: Boolean = false
 
     private var resolvedSeasonId: Long? = null
     private var progressLastEpId: Long? = null
@@ -67,6 +68,8 @@ class BangumiDetailActivity : BaseActivity() {
 
     private var episodeOrderReversed: Boolean = false
     private var extrasOrderReversed: Boolean = false
+    private var pendingContinueEpIdHint: Long? = null
+    private var pendingContinueEpIndexHint: Int? = null
 
     private var mainEpisodes: List<BangumiEpisode> = emptyList()
     private var extraEpisodes: List<BangumiEpisode> = emptyList()
@@ -95,18 +98,24 @@ class BangumiDetailActivity : BaseActivity() {
         }
 
         episodeOrderReversed = BiliClient.prefs.pgcEpisodeOrderReversed
+        pendingContinueEpIdHint = continueEpIdArg
+        pendingContinueEpIndexHint = continueEpIndexArg
 
         showLoadingUi()
         Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
 
         initUi()
-        load()
+        load(showRefreshing = true)
     }
 
     override fun onResume() {
         super.onResume()
         Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
         if (this::headerAdapter.isInitialized) headerAdapter.invalidateSizing()
+        if (!hasLoadedDetailOnce) return
+        if (binding.swipeRefresh.isRefreshing) return
+        if (loadJob?.isActive == true) return
+        load(showRefreshing = false)
     }
 
     private fun showLoadingUi() {
@@ -187,7 +196,7 @@ class BangumiDetailActivity : BaseActivity() {
         (binding.recycler.itemAnimator as? SimpleItemAnimator)?.supportsChangeAnimations = false
         binding.recycler.adapter = headerAdapter
 
-        binding.swipeRefresh.setOnRefreshListener { load() }
+        binding.swipeRefresh.setOnRefreshListener { load(showRefreshing = true) }
 
         applyHeader()
         binding.recycler.post { headerAdapter.requestFocusPlay() }
@@ -199,12 +208,12 @@ class BangumiDetailActivity : BaseActivity() {
         binding.recycler.smoothScrollToPositionStart(0)
     }
 
-    private fun load() {
+    private fun load(showRefreshing: Boolean) {
         val token = ++requestToken
         loadJob?.cancel()
         loadJob = null
 
-        binding.swipeRefresh.isRefreshing = true
+        if (showRefreshing) binding.swipeRefresh.isRefreshing = true
 
         loadJob =
             lifecycleScope.launch {
@@ -225,6 +234,7 @@ class BangumiDetailActivity : BaseActivity() {
                     resolvedSeasonId = detail.seasonId.takeIf { it > 0L } ?: seasonId
                     applyDetail(detail)
                     applyHeader()
+                    hasLoadedDetailOnce = true
                 } catch (t: Throwable) {
                     if (t is CancellationException) return@launch
                     AppLog.e("BangumiDetail", "load failed seasonId=${seasonIdArg ?: -1L} epId=${epIdArg ?: -1L}", t)
@@ -267,12 +277,16 @@ class BangumiDetailActivity : BaseActivity() {
         mainEpisodes = normalizeEpisodeOrder(detail.episodes)
         extraEpisodes = detail.extraSections.flatMap { it.episodes }
 
+        val continueEpIdHint = pendingContinueEpIdHint
+        val continueEpIndexHint = pendingContinueEpIndexHint
         continueEpisode =
-            (continueEpIdArg ?: detail.progressLastEpId)?.let { id ->
+            (continueEpIdHint ?: detail.progressLastEpId)?.let { id ->
                 mainEpisodes.firstOrNull { it.epId == id }
-            } ?: continueEpIndexArg?.let { idx ->
+            } ?: continueEpIndexHint?.let { idx ->
                 mainEpisodes.firstOrNull { it.title.trim() == idx.toString() }
             }
+        pendingContinueEpIdHint = null
+        pendingContinueEpIndexHint = null
 
         mainEpisodeCards =
             mainEpisodes.mapIndexedNotNull { index, ep ->

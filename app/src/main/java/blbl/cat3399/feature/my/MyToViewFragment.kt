@@ -146,6 +146,7 @@ class MyToViewFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler {
         super.onResume()
         (binding.recycler.layoutManager as? GridLayoutManager)?.spanCount = spanCountForWidth(resources)
         maybeTriggerInitialLoad()
+        silentRefreshForProgressDataSource()
         maybeConsumePendingFocusFirstItemFromTabSwitch()
     }
 
@@ -211,6 +212,14 @@ class MyToViewFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler {
         binding.swipeRefresh.isRefreshing = true
         reload()
         initialLoadTriggered = true
+    }
+
+    private fun silentRefreshForProgressDataSource() {
+        val b = _binding ?: return
+        if (!initialLoadTriggered) return
+        if (adapter.itemCount <= 0) return
+        if (b.swipeRefresh.isRefreshing) return
+        reload()
     }
 
     private fun reload() {

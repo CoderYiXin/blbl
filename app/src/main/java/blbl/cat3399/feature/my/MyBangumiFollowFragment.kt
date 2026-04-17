@@ -35,7 +35,6 @@ class MyBangumiFollowFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHa
     private var initialLoadTriggered: Boolean = false
     private var pendingRestorePosition: Int? = null
     private var pendingFocusFirstItemFromTabSwitch: Boolean = false
-    private var pendingRefreshAfterDetail: Boolean = false
     private var pendingFocusFirstItemAfterRefresh: Boolean = false
     private var dpadGridController: DpadGridController? = null
 
@@ -50,7 +49,6 @@ class MyBangumiFollowFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHa
                 val nav = findMyNavigator()
                 if (nav != null) {
                     pendingRestorePosition = position
-                    pendingRefreshAfterDetail = true
                     nav.openBangumiDetail(
                         seasonId = season.seasonId,
                         isDrama = type == 2,
@@ -115,9 +113,9 @@ class MyBangumiFollowFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHa
     override fun onResume() {
         super.onResume()
         (binding.recycler.layoutManager as? GridLayoutManager)?.spanCount = spanCountForBangumi()
-        maybeRefreshAfterDetailReturn()
         maybeTriggerInitialLoad()
-        restoreFocusIfNeeded()
+        val refreshed = silentRefreshForProgressDataSource()
+        if (!refreshed) restoreFocusIfNeeded()
         maybeConsumePendingFocusFirstItemFromTabSwitch()
     }
 
@@ -191,20 +189,9 @@ class MyBangumiFollowFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHa
         initialLoadTriggered = true
     }
 
-    private fun maybeRefreshAfterDetailReturn() {
-        if (!pendingRefreshAfterDetail) return
-        pendingRefreshAfterDetail = false
-        if (!this::adapter.isInitialized) return
-        val b = _binding ?: return
-        if (b.swipeRefresh.isRefreshing) return
-        b.swipeRefresh.isRefreshing = true
-        resetAndLoad(fromUserRefresh = false)
-    }
-
     private fun resetAndLoad(fromUserRefresh: Boolean = false) {
         if (fromUserRefresh) {
             pendingFocusFirstItemAfterRefresh = true
-            pendingRefreshAfterDetail = false
             pendingRestorePosition = null
             pendingFocusFirstItemFromTabSwitch = false
         }
@@ -213,6 +200,18 @@ class MyBangumiFollowFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHa
         dpadGridController?.parkFocusForDataSetReset()
         adapter.submit(emptyList())
         loadNextPage(isRefresh = true)
+    }
+
+    private fun silentRefreshForProgressDataSource(): Boolean {
+        val b = _binding ?: return false
+        if (!initialLoadTriggered) return false
+        if (adapter.itemCount <= 0) return false
+        if (b.swipeRefresh.isRefreshing) return false
+        if (paging.snapshot().isLoading) return false
+        paging.reset()
+        dpadGridController?.clearPendingFocusAfterLoadMore()
+        loadNextPage(isRefresh = true)
+        return true
     }
 
     private data class FetchedPage(
@@ -310,7 +309,6 @@ class MyBangumiFollowFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHa
 
     override fun onDestroyView() {
         initialLoadTriggered = false
-        pendingRefreshAfterDetail = false
         dpadGridController?.release()
         dpadGridController = null
         _binding = null
