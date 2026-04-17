@@ -99,7 +99,6 @@ internal class PlayerTouchController(
                         return true
                     }
 
-                    activity.showSeekOsd()
                     activity.smartSeek(direction = dir, showControls = false, hintKind = SeekHintKind.Step)
                     activity.tapSeekActiveDirection = dir
                     activity.tapSeekActiveUntilMs = android.os.SystemClock.uptimeMillis() + touchTapSeekActiveMs
@@ -123,7 +122,6 @@ internal class PlayerTouchController(
                     if (width > 0f && now <= activity.tapSeekActiveUntilMs) {
                         val dir = activity.edgeDirection(e.x, width)
                         if (dir != 0 && dir == activity.tapSeekActiveDirection) {
-                            activity.showSeekOsd()
                             activity.smartSeek(direction = dir, showControls = false, hintKind = SeekHintKind.Step)
                             activity.tapSeekActiveUntilMs = now + touchTapSeekActiveMs
                             return true
@@ -376,6 +374,7 @@ internal class PlayerTouchController(
         activity.cancelPendingAutoResume(reason = "user_seek")
         activity.cancelPendingAutoSkip(reason = "user_seek", markIgnored = true)
         activity.cancelPendingAutoNext(reason = "user_seek", markCancelledByUser = false)
+        activity.cancelDeferredKeySeekPreview(resetScrubbing = false)
         activity.scrubbing = true
         activity.keyScrubPendingSeekToMs = null
         activity.keyScrubEndJob?.cancel()

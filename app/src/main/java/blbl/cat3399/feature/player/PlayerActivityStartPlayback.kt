@@ -69,6 +69,10 @@ internal fun PlayerActivity.resetPlaybackStateForNewMedia(
     session = session.copy(actualAudioId = 0)
     currentViewDurationMs = null
     debug.reset()
+    clearKeySeekPending()
+    cancelDeferredKeySeekPreview()
+    holdScrubPreviewPosMs = null
+    scrubbing = false
     resetBufferingOverlayState()
     subtitleAvailabilityKnown = false
     subtitleAvailable = false

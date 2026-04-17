@@ -42,10 +42,10 @@ internal fun PlayerActivity.updateProgressUi() {
     val exo = player ?: return
     val duration = exo.duration.takeIf { it > 0 } ?: currentViewDurationMs ?: 0L
     val pos = exo.currentPosition.coerceAtLeast(0L)
-    val uiPos = holdScrubPreviewPosMs ?: pos
+    val uiPos = resolvePlayerUiPositionMs(pos, holdScrubPreviewPosMs, keySeekPreviewPosMs)
     val bufPos = exo.bufferedPosition.coerceAtLeast(0L)
 
-    val uiScrubbing = scrubbing || holdScrubPreviewPosMs != null
+    val uiScrubbing = scrubbing || holdScrubPreviewPosMs != null || keySeekPreviewPosMs != null
     if (!uiScrubbing) {
         binding.tvTime.text = "${formatHms(pos)} / ${formatHms(duration)}"
         binding.tvSeekOsdTime.text = "${formatHms(pos)} / ${formatHms(duration)}"

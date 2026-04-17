@@ -144,6 +144,9 @@ class PlayerActivity : BaseActivity() {
     internal var holdPrevSpeed: Float = 1.0f
     internal var holdPrevPlayWhenReady: Boolean = false
     internal var holdScrubPreviewPosMs: Long? = null
+    internal var keySeekPreviewPosMs: Long? = null
+    internal var keySeekBufferingOverlaySuppressedUntilMs: Long = 0L
+    internal var keySeekBufferingOverlayEligibleAtMs: Long = 0L
     internal var loadJob: kotlinx.coroutines.Job? = null
     internal var lastEndedActionAtMs: Long = 0L
     internal var playbackUncaughtHandler: CoroutineExceptionHandler? = null
@@ -1570,7 +1573,6 @@ class PlayerActivity : BaseActivity() {
                 }
 
                 if (pendingDir != 0) {
-                    showSeekOsd()
                     smartSeek(direction = pendingDir, showControls = false, hintKind = SeekHintKind.Step)
                     return true
                 }
@@ -1792,6 +1794,7 @@ class PlayerActivity : BaseActivity() {
 
     override fun onStop() {
         touchController?.onStop()
+        cancelDeferredKeySeekPreview()
         exitTraceStopAtMs = SystemClock.elapsedRealtime()
         if (exitCleanupRequested || isFinishing) {
             exitTraceStart("onStop")
@@ -2108,11 +2111,17 @@ class PlayerActivity : BaseActivity() {
                     cancelPendingAutoNext(reason = "user_seek", markCancelledByUser = false)
                     scrubbing = true
                     noteUserInteraction()
-                    if (seekBar?.isPressed != true) scheduleKeyScrubEnd()
+                    if (seekBar?.isPressed != true) {
+                        suppressBufferingOverlayDuringKeySeek(KEY_SCRUB_END_DELAY_MS)
+                        scheduleKeyScrubEnd()
+                    }
 
                     val duration = engine.duration.takeIf { it > 0 } ?: currentViewDurationMs
                     if (duration != null) {
                         val previewPos = (duration * progress) / SEEK_MAX
+                        if (seekBar?.isPressed != true) {
+                            keySeekPreviewPosMs = previewPos
+                        }
                         binding.tvTime.text = "${formatHms(previewPos)} / ${formatHms(duration)}"
 
                         val hasVideoShot =
@@ -2128,13 +2137,14 @@ class PlayerActivity : BaseActivity() {
 
                     if (binding.seekProgress.isFocused && duration != null) {
                         val seekTo = duration * progress / SEEK_MAX
-                        val isIjk = engine.kind == PlayerEngineKind.IjkPlayer
-                        if (isIjk && seekBar?.isPressed != true) {
-                            // Key-scrub (focused SeekBar, not touch dragging): defer the actual seek until
-                            // the user stops scrubbing, otherwise ijk/ffmpeg may clamp seeks to the buffered edge.
+                        if (seekBar?.isPressed != true) {
+                            // Key-scrub (focused SeekBar, not touch dragging): keep preview updates immediate,
+                            // but coalesce the actual seek until the user briefly settles on a target.
                             keyScrubPendingSeekToMs = seekTo
+                            updateBufferingOverlay()
                         } else {
-                            val isIjkDragging = isIjk && seekBar?.isPressed == true
+                            keySeekPreviewPosMs = null
+                            val isIjkDragging = engine.kind == PlayerEngineKind.IjkPlayer
                             if (!isIjkDragging) engine.seekTo(seekTo)
                         }
                     }
@@ -2144,6 +2154,7 @@ class PlayerActivity : BaseActivity() {
                     cancelPendingAutoResume(reason = "user_seek")
                     cancelPendingAutoSkip(reason = "user_seek", markIgnored = true)
                     cancelPendingAutoNext(reason = "user_seek", markCancelledByUser = false)
+                    cancelDeferredKeySeekPreview(resetScrubbing = false)
                     scrubbing = true
                     keyScrubPendingSeekToMs = null
                     keyScrubEndJob?.cancel()
@@ -2154,6 +2165,7 @@ class PlayerActivity : BaseActivity() {
                     val duration = engine.duration.takeIf { it > 0 } ?: currentViewDurationMs ?: return
                     val progress = seekBar?.progress ?: return
                     val seekTo = duration * progress / SEEK_MAX
+                    keySeekPreviewPosMs = null
                     keyScrubPendingSeekToMs = null
                     engine.seekTo(seekTo)
                     binding.tvTime.text = "${formatHms(seekTo)} / ${formatHms(duration)}"
@@ -3669,7 +3681,9 @@ class PlayerActivity : BaseActivity() {
         internal const val AUTO_SKIP_START_WINDOW_MS = 1_000L
         internal const val AUTO_SKIP_DELAY_MS = 2_000L
         internal const val AUTO_RESUME_BACK_RESTART_WINDOW_MS = 3_000L
+        internal const val KEY_STEP_SEEK_COMMIT_DELAY_MS = 450L
         internal const val KEY_SCRUB_END_DELAY_MS = 800L
+        internal const val KEY_SEEK_BUFFERING_POST_COMMIT_GRACE_MS = 250L
         private const val DANMAKU_DEFAULT_SEGMENT_MS = 6 * 60 * 1000
         private const val DANMAKU_PREFETCH_SEGMENTS = 2
         private const val DANMAKU_PREFETCH_INTERVAL_MS = 1_000L
