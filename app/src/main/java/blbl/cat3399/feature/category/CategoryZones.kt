@@ -17,7 +17,12 @@ object CategoryZones {
             Zone("生活", 160),
             Zone("美食", 211),
             Zone("动物圈", 217),
+            Zone("资讯", 202),
+            Zone("娱乐", 5),
+            Zone("影视", 181),
         )
 
     fun findByTid(tid: Int): Zone? = defaultZones.firstOrNull { it.tid == tid }
+
+    fun findAll(): Zone? = defaultZones.firstOrNull { it.tid == null }
 }

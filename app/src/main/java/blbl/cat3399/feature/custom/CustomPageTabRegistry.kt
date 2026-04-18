@@ -38,6 +38,7 @@ object CustomPageTabRegistry {
     const val TYPE_HOME_POPULAR = "home_popular"
     const val TYPE_HOME_BANGUMI = "home_bangumi"
     const val TYPE_HOME_CINEMA = "home_cinema"
+    const val TYPE_CATEGORY_ALL = "category_all"
     const val TYPE_CATEGORY_ZONE = "category_zone"
     const val TYPE_DYNAMIC_VIDEO = "dynamic_video"
     const val TYPE_MY_HISTORY = "my_history"
@@ -179,6 +180,7 @@ object CustomPageTabRegistry {
             add(CustomPageTabConfig(sourceType = TYPE_HOME_POPULAR))
             add(CustomPageTabConfig(sourceType = TYPE_HOME_BANGUMI))
             add(CustomPageTabConfig(sourceType = TYPE_HOME_CINEMA))
+            add(CustomPageTabConfig(sourceType = TYPE_CATEGORY_ALL))
             CategoryZones.defaultZones
                 .mapNotNull { zone ->
                     zone.tid?.let { tid ->
@@ -238,6 +240,18 @@ object CustomPageTabRegistry {
                     itemOrder = 40,
                     createFragment = { PgcRecommendGridFragment.newCinema() },
                 )
+
+            TYPE_CATEGORY_ALL -> {
+                val zone = CategoryZones.findAll() ?: return null
+                Descriptor(
+                    stableKey = stableKeyFor(config),
+                    managerLabel = "分类-${zone.title}",
+                    tabTitle = zone.title,
+                    groupKey = GROUP_CATEGORY,
+                    itemOrder = categoryOrderForTid(null),
+                    createFragment = { VideoGridFragment.newPopular() },
+                )
+            }
 
             TYPE_CATEGORY_ZONE -> {
                 val tid = config.sourceKey?.toIntOrNull()?.takeIf { it > 0 } ?: return null
@@ -353,7 +367,7 @@ object CustomPageTabRegistry {
         }
     }
 
-    private fun categoryOrderForTid(tid: Int): Int {
+    private fun categoryOrderForTid(tid: Int?): Int {
         val index = CategoryZones.defaultZones.indexOfFirst { it.tid == tid }
         return if (index >= 0) 100 + index else Int.MAX_VALUE
     }
