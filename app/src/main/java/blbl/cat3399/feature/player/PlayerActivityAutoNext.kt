@@ -57,6 +57,29 @@ private fun autoNextFallbackTitleForMode(mode: String): String {
     }
 }
 
+private fun PlayerActivity.hasPendingPartsAutoNextResolution(): Boolean {
+    return partsListFetchJob?.isActive == true
+}
+
+private fun PlayerActivity.hasPendingRecommendAutoNextResolution(): Boolean {
+    val requestBvid = currentBvid.trim()
+    if (requestBvid.isBlank()) return false
+    if (relatedVideosCache?.bvid == requestBvid) return false
+    return relatedVideosFetchJob?.isActive == true
+}
+
+private fun PlayerActivity.shouldShowAutoNextHintFallback(mode: String): Boolean {
+    val hasPendingPartsResolution = hasPendingPartsAutoNextResolution()
+    val hasPendingRecommendResolution = hasPendingRecommendAutoNextResolution()
+    return when (mode) {
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST -> hasPendingPartsResolution
+        AppPrefs.PLAYER_PLAYBACK_MODE_PARTS_LIST_THEN_RECOMMEND ->
+            hasPendingPartsResolution || hasPendingRecommendResolution
+        AppPrefs.PLAYER_PLAYBACK_MODE_RECOMMEND -> hasPendingRecommendResolution
+        else -> false
+    }
+}
+
 internal fun PlayerActivity.isAutoNextUiBlocked(): Boolean {
     if (osdMode != PlayerActivity.OsdMode.Hidden) return true
     if (transientSeekOsdVisible) return true
@@ -299,7 +322,7 @@ internal fun PlayerActivity.maybeStartAutoNextAfterEndedCountdown() {
     val target = resolveAutoNextTargetByPlaybackMode(preloadRecommendation = true)
     if (target != null) {
         showAutoNextHint(target)
-    } else {
+    } else if (shouldShowAutoNextHintFallback(mode)) {
         showAutoNextHintFallback(autoNextFallbackTitleForMode(mode))
     }
 
