@@ -2,9 +2,10 @@ package blbl.cat3399.feature.player
 
 import android.view.KeyEvent
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
-import blbl.cat3399.core.prefs.PlayerPlaybackModes
 import blbl.cat3399.core.prefs.PlayerCustomShortcutsStore
+import blbl.cat3399.core.prefs.PlayerPlaybackModes
 import blbl.cat3399.feature.player.engine.ExoPlayerEngine
 import java.util.Locale
 import java.util.WeakHashMap
@@ -363,7 +364,7 @@ private fun PlayerActivity.applyPlayerCustomShortcut(keyCode: Int, action: Playe
         }
 
         is PlayerCustomShortcutAction.SetDanmakuArea -> {
-            val target = action.area.takeIf { it.isFinite() }?.coerceIn(0.05f, 1.0f) ?: 1.0f
+            val target = action.area.takeIf { it.isFinite() }?.let(AppPrefs::normalizeLegacyDanmakuAreaCompat) ?: AppPrefs.DANMAKU_AREA_DEFAULT
             val current = session.danmaku.area
             val next =
                 if (sameFloat(current, target)) {
@@ -373,7 +374,7 @@ private fun PlayerActivity.applyPlayerCustomShortcut(keyCode: Int, action: Playe
                     target
                 }
             applyDanmakuSettingValue(
-                value = next.coerceIn(0.05f, 1.0f),
+                value = AppPrefs.normalizeDanmakuArea(next),
                 updateDanmaku = { copy(area = it) },
                 syncToGlobal = { danmakuArea = it },
                 afterApplied = { binding.danmakuView.invalidate() },

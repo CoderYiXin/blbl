@@ -7,6 +7,7 @@ import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlin.math.abs
 import kotlin.math.roundToInt
 
 class AppPrefs(context: Context) {
@@ -270,8 +271,15 @@ class AppPrefs(context: Context) {
         set(value) = prefs.edit().putInt(KEY_DANMAKU_SPEED, value).apply()
 
     var danmakuArea: Float
-        get() = prefs.getFloat(KEY_DANMAKU_AREA, 1.0f)
-        set(value) = prefs.edit().putFloat(KEY_DANMAKU_AREA, value).apply()
+        get() {
+            val raw = prefs.getFloat(KEY_DANMAKU_AREA, DANMAKU_AREA_DEFAULT)
+            val normalized = normalizeLegacyDanmakuAreaCompat(raw)
+            if (abs(raw - normalized) > DANMAKU_AREA_COMPAT_EPSILON) {
+                prefs.edit().putFloat(KEY_DANMAKU_AREA, normalized).apply()
+            }
+            return normalized
+        }
+        set(value) = prefs.edit().putFloat(KEY_DANMAKU_AREA, normalizeDanmakuArea(value)).apply()
 
     var playerPreferredQn: Int
         get() = prefs.getInt(KEY_PLAYER_PREFERRED_QN, 80)
@@ -1004,6 +1012,52 @@ class AppPrefs(context: Context) {
         const val DANMAKU_LANE_DENSITY_SPARSE = "sparse"
         const val DANMAKU_LANE_DENSITY_STANDARD = "standard"
         const val DANMAKU_LANE_DENSITY_DENSE = "dense"
+
+        const val DANMAKU_AREA_MIN = 0.10f
+        const val DANMAKU_AREA_MAX = 1.00f
+        const val DANMAKU_AREA_STEP = 0.10f
+        const val DANMAKU_AREA_DEFAULT = DANMAKU_AREA_MAX
+        const val DANMAKU_AREA_COMPAT_EPSILON = 0.0001f
+
+        val DANMAKU_AREA_OPTIONS: List<Float> = (1..10).map { it / 10f }
+
+        private val LEGACY_DANMAKU_AREA_OPTIONS: List<Float> =
+            listOf(
+                1f / 6f,
+                1f / 5f,
+                0.25f,
+                1f / 3f,
+                2f / 5f,
+                0.50f,
+                3f / 5f,
+                2f / 3f,
+                0.75f,
+                4f / 5f,
+                1.00f,
+            )
+
+        fun normalizeDanmakuArea(value: Float): Float {
+            val v = value.takeIf { it.isFinite() } ?: DANMAKU_AREA_DEFAULT
+            val clamped = v.coerceIn(DANMAKU_AREA_MIN, DANMAKU_AREA_MAX)
+            val scaled = (clamped * 100f).roundToInt()
+            val step = (DANMAKU_AREA_STEP * 100f).roundToInt().coerceAtLeast(1)
+            val snapped = ((scaled + step / 2) / step) * step
+            return (snapped / 100f).coerceIn(DANMAKU_AREA_MIN, DANMAKU_AREA_MAX)
+        }
+
+        /**
+         * 0.1.22 生效，3 个版本后移除兼容：
+         * 兼容历史分数档位（1/6、1/5、1/4、1/3、2/5、1/2、3/5、2/3、3/4、4/5、1），
+         * 统一按新的 10% 档位四舍五入吸收到规范值。
+         */
+        fun normalizeLegacyDanmakuAreaCompat(value: Float): Float {
+            val sanitized = value.takeIf { it.isFinite() } ?: DANMAKU_AREA_DEFAULT
+            val legacy =
+                LEGACY_DANMAKU_AREA_OPTIONS.firstOrNull { legacyValue ->
+                    abs(legacyValue - sanitized) < DANMAKU_AREA_COMPAT_EPSILON
+                }
+            return normalizeDanmakuArea(legacy ?: sanitized)
+        }
 
         fun normalizeVideoCardLongPressAction(value: String?): String {
             return when (value?.trim()) {

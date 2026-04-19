@@ -1,5 +1,6 @@
 package blbl.cat3399.feature.player
 
+import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.feature.player.danmaku.DanmakuSessionSettings
 import blbl.cat3399.feature.player.danmaku.DanmakuFontWeight
 import blbl.cat3399.feature.player.danmaku.DanmakuLaneDensity
@@ -227,7 +228,7 @@ internal fun PlayerSessionSettings.restoreFromEngineSwitchJsonString(raw: String
     val danFontWeight = DanmakuFontWeight.fromPrefValue(obj.optString("danmakuFontWeight", danmaku.fontWeight.prefValue))
     val danStrokeWidthPx = normalizeDanmakuStrokeWidthPx(optInt("danmakuStrokeWidthPx", danmaku.strokeWidthPx))
     val danSpeed = optInt("danmakuSpeedLevel", danmaku.speedLevel).coerceIn(1, 10)
-    val danArea = optFloat("danmakuArea", danmaku.area).coerceIn(0.05f, 1.0f)
+    val danArea = AppPrefs.normalizeLegacyDanmakuAreaCompat(optFloat("danmakuArea", danmaku.area))
     val danLaneDensity = DanmakuLaneDensity.fromPrefValue(obj.optString("danmakuLaneDensity", danmaku.laneDensity.prefValue))
     val danShowHighLikeIcon = obj.optBoolean("danmakuShowHighLikeIcon", danmaku.showHighLikeIcon)
     val dbg = obj.optBoolean("debugEnabled", debugEnabled)

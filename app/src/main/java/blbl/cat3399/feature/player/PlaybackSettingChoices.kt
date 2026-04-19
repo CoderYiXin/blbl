@@ -1,8 +1,10 @@
 package blbl.cat3399.feature.player
 
+import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.feature.player.danmaku.DanmakuFontWeight
 import blbl.cat3399.feature.player.danmaku.DanmakuLaneDensity
 import kotlin.math.abs
+import kotlin.math.roundToInt
 
 internal object PlaybackSettingChoices {
     val resolutionQns: List<Int> = listOf(16, 32, 64, 74, 80, 100, 112, 116, 120, 125, 126, 127, 129)
@@ -21,20 +23,7 @@ internal object PlaybackSettingChoices {
 
     val danmakuOpacities: List<Float> = (20 downTo 1).map { it / 20f }
     val danmakuTextSizes: List<Int> = subtitleTextSizes
-    val danmakuAreas: List<Pair<Float, String>> =
-        listOf(
-            (1f / 6f) to "1/6",
-            (1f / 5f) to "1/5",
-            0.25f to "1/4",
-            (1f / 3f) to "1/3",
-            (2f / 5f) to "2/5",
-            0.50f to "1/2",
-            (3f / 5f) to "3/5",
-            (2f / 3f) to "2/3",
-            0.75f to "3/4",
-            (4f / 5f) to "4/5",
-            1.00f to "不限",
-        )
+    val danmakuAreas: List<Pair<Float, String>> = AppPrefs.DANMAKU_AREA_OPTIONS.map { it to "${(it * 100f).roundToInt()}%" }
     val danmakuStrokeWidths: List<Int> = listOf(0, 2, 4, 6)
     val danmakuFontWeights: List<DanmakuFontWeight> = listOf(DanmakuFontWeight.Normal, DanmakuFontWeight.Bold)
     val danmakuLaneDensities: List<DanmakuLaneDensity> =

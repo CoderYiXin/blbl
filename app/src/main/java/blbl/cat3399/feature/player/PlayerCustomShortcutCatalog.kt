@@ -1,5 +1,6 @@
 package blbl.cat3399.feature.player
 
+import blbl.cat3399.core.prefs.AppPrefs
 import blbl.cat3399.core.prefs.PlayerCustomShortcutAction
 import blbl.cat3399.core.prefs.PlayerCustomShortcutOpenVideoListTarget
 import blbl.cat3399.core.prefs.PlayerPlaybackModes
@@ -267,11 +268,11 @@ internal object PlayerCustomShortcutCatalog {
             }
 
             PlayerCustomShortcutAction.TYPE_SET_DANMAKU_AREA -> {
-                val options = listOf(1.0f, 0.8f, 0.75f, 2f / 3f, 0.6f, 0.5f, 0.4f, 1f / 3f, 0.25f, 0.2f, 1f / 6f)
+                val options = PlaybackSettingChoices.danmakuAreas
                 val current = (currentAction as? PlayerCustomShortcutAction.SetDanmakuArea)?.area
-                val checked = options.indices.minByOrNull { idx -> abs(options[idx] - (current ?: 1f)) } ?: 0
+                val checked = options.indices.minByOrNull { idx -> abs(options[idx].first - (current ?: AppPrefs.DANMAKU_AREA_DEFAULT)) } ?: options.lastIndex
                 PlayerCustomShortcutValuePickerConfig(
-                    choices = options.map { PlayerCustomShortcutValueChoice(areaText(it), PlayerCustomShortcutAction.SetDanmakuArea(area = it)) },
+                    choices = options.map { PlayerCustomShortcutValueChoice(it.second, PlayerCustomShortcutAction.SetDanmakuArea(area = it.first)) },
                     checkedIndex = checked,
                 )
             }

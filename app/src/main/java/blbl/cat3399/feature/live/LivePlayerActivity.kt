@@ -742,7 +742,7 @@ class LivePlayerActivity : BaseActivity() {
 
             is PlayerCustomShortcutAction.SetDanmakuArea -> {
                 noteUserInteraction()
-                val target = action.area.takeIf { it.isFinite() }?.coerceIn(0.05f, 1.0f) ?: session.danmaku.area
+                val target = action.area.takeIf { it.isFinite() }?.let(AppPrefs::normalizeLegacyDanmakuAreaCompat) ?: session.danmaku.area
                 val current = session.danmaku.area
                 val next =
                     if (sameFloat(current, target)) {
@@ -1870,7 +1870,7 @@ class LivePlayerActivity : BaseActivity() {
         val restoredDanmakuFontWeight = DanmakuFontWeight.fromPrefValue(obj.optString("danmakuFontWeight", danmaku.fontWeight.prefValue))
         val restoredDanmakuStrokeWidthPx = normalizeDanmakuStrokeWidthPx(optInt("danmakuStrokeWidthPx", danmaku.strokeWidthPx))
         val restoredDanmakuSpeedLevel = optInt("danmakuSpeedLevel", danmaku.speedLevel).coerceIn(1, 10)
-        val restoredDanmakuArea = optFloat("danmakuArea", danmaku.area).coerceIn(0.05f, 1.0f)
+        val restoredDanmakuArea = AppPrefs.normalizeLegacyDanmakuAreaCompat(optFloat("danmakuArea", danmaku.area))
         val restoredDanmakuLaneDensity = DanmakuLaneDensity.fromPrefValue(obj.optString("danmakuLaneDensity", danmaku.laneDensity.prefValue))
         val restoredDebugEnabled = obj.optBoolean("debugEnabled", debugEnabled)
 

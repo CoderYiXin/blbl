@@ -342,7 +342,7 @@ internal object PlayerCustomShortcutsStore {
             PlayerCustomShortcutAction.TYPE_SET_DANMAKU_AREA -> {
                 val v = params?.optDouble("area", Double.NaN)?.toFloat() ?: return null
                 if (!v.isFinite()) return null
-                PlayerCustomShortcutAction.SetDanmakuArea(area = v.coerceIn(0.05f, 1.0f))
+                PlayerCustomShortcutAction.SetDanmakuArea(area = AppPrefs.normalizeLegacyDanmakuAreaCompat(v))
             }
 
             else -> null

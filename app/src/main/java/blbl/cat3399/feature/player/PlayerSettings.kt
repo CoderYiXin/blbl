@@ -1090,7 +1090,7 @@ internal fun PlayerActivity.showDanmakuAreaDialog() {
         label = { it.second },
     ) { picked ->
         applyDanmakuSettingValue(
-            value = picked.first.coerceIn(0.05f, 1.0f),
+            value = AppPrefs.normalizeDanmakuArea(picked.first),
             updateDanmaku = { copy(area = it) },
             syncToGlobal = { danmakuArea = it },
             afterApplied = { binding.danmakuView.invalidate() },
