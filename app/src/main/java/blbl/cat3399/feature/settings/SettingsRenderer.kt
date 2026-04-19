@@ -216,7 +216,7 @@ class SettingsRenderer(
                         SettingId.MainAutoHideSidebarOnEnterContent,
                         "进入内容区后关闭侧边栏",
                         if (prefs.mainAutoHideSidebarOnEnterContent) "开" else "关",
-                        "从侧边栏进入内容区后自动收起，返回侧边栏时再展开",
+                        null,
                     ),
                     SettingEntry(
                         SettingId.MainBackFocusScheme,
@@ -296,7 +296,6 @@ class SettingsRenderer(
                         if (prefs.playerSettingsApplyToGlobal) "开" else "关",
                         null,
                     ),
-                    SettingEntry(SettingId.PlayerStyle, "播放器样式", SettingsText.playerStyleText(prefs.playerStyle), null),
                     SettingEntry(SettingId.SubtitlePreferredLang, "字幕语言", SettingsText.subtitleLangText(prefs.subtitlePreferredLang), null),
                     SettingEntry(SettingId.SubtitleTextSizeSp, "字幕字体大小", prefs.subtitleTextSizeSp.toInt().toString(), null),
                     SettingEntry(
@@ -343,7 +342,7 @@ class SettingsRenderer(
                         SettingId.PlayerTouchGesturesEnabled,
                         "触摸手势",
                         if (prefs.playerTouchGesturesEnabled) "开" else "关",
-                        "单击/双击/滑动调节/触摸锁",
+                        null,
                     ),
                     SettingEntry(
                         SettingId.PlayerVideoShotPreviewSize,
