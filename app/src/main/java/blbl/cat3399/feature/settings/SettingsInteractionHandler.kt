@@ -43,6 +43,7 @@ import blbl.cat3399.core.ui.popup.AppPopup
 import blbl.cat3399.core.ui.popup.PopupAction
 import blbl.cat3399.core.ui.popup.PopupActionRole
 import blbl.cat3399.core.update.ApkUpdater
+import blbl.cat3399.feature.player.engine.IjkPlayerPlugin
 import blbl.cat3399.feature.player.engine.IjkPlayerPluginUi
 import blbl.cat3399.feature.player.AudioBalanceLevel
 import blbl.cat3399.feature.player.PlaybackSettingChoices
@@ -1499,6 +1500,8 @@ class SettingsInteractionHandler(
                 copyToClipboard(label = "QQ交流群", text = SettingsConstants.QQ_GROUP, toastText = "已复制群号：${SettingsConstants.QQ_GROUP}")
             }
 
+            SettingId.PlayerKernelCheck -> handlePlayerKernelCheck()
+
             SettingId.CheckUpdate -> {
                 when (val checkState = state.testUpdateCheckState) {
                     TestUpdateCheckState.Checking -> {
@@ -1514,6 +1517,26 @@ class SettingsInteractionHandler(
             }
 
             else -> AppLog.i("Settings", "click id=${entry.id.key} title=${entry.title}")
+        }
+    }
+
+    private fun handlePlayerKernelCheck() {
+        when (IjkPlayerPlugin.status(activity)) {
+            IjkPlayerPlugin.InstallStatus.Unsupported -> {
+                AppToast.showLong(activity, "当前设备不支持 IjkPlayer（ABI=${Build.SUPPORTED_ABIS.joinToString()}）")
+            }
+
+            IjkPlayerPlugin.InstallStatus.Installed -> {
+                AppToast.show(activity, "播放器内核已是最新")
+            }
+
+            IjkPlayerPlugin.InstallStatus.NotInstalled,
+            IjkPlayerPlugin.InstallStatus.NeedsUpdate,
+            -> {
+                IjkPlayerPluginUi.ensureInstalled(activity) {
+                    renderer.refreshAboutSectionKeepPosition()
+                }
+            }
         }
     }
 

@@ -11,6 +11,7 @@ import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.ui.FocusTreeUtils
 import blbl.cat3399.databinding.ActivitySettingsBinding
 import blbl.cat3399.feature.player.AudioBalanceLevel
+import blbl.cat3399.feature.player.engine.IjkPlayerPlugin
 
 class SettingsRenderer(
     private val activity: SettingsActivity,
@@ -445,6 +446,7 @@ class SettingsRenderer(
                     SettingEntry(SettingId.LogTag, "日志标签", "BLBL", "用于 Logcat 过滤"),
                     SettingEntry(SettingId.ExportLogs, "导出日志", "保存文件", null),
                     SettingEntry(SettingId.UploadLogs, "上传日志", "点击上传", "打包并上传日志zip到开发者（含设备/版本/非登录配置元数据）"),
+                    playerKernelEntry(),
                     aboutUpdateEntry(),
                 )
 
@@ -459,6 +461,22 @@ class SettingsRenderer(
                 )
 
             else -> emptyList()
+        }
+    }
+
+    private fun playerKernelEntry(): SettingEntry {
+        return when (IjkPlayerPlugin.status(activity)) {
+            IjkPlayerPlugin.InstallStatus.Unsupported ->
+                SettingEntry(SettingId.PlayerKernelCheck, "播放器内核检测", "不支持", null)
+
+            IjkPlayerPlugin.InstallStatus.NotInstalled ->
+                SettingEntry(SettingId.PlayerKernelCheck, "播放器内核检测", "未安装", null)
+
+            IjkPlayerPlugin.InstallStatus.NeedsUpdate ->
+                SettingEntry(SettingId.PlayerKernelCheck, "播放器内核检测", "需要更新", null)
+
+            IjkPlayerPlugin.InstallStatus.Installed ->
+                SettingEntry(SettingId.PlayerKernelCheck, "播放器内核检测", "已就绪", null)
         }
     }
 

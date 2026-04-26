@@ -97,6 +97,7 @@ enum class SettingId(
     DanmakuAllowSpecial("danmaku_allow_special"),
 
     // 关于应用
+    PlayerKernelCheck("player_kernel_check"),
     AppVersion("app_version"),
     ProjectUrl("project_url"),
     QqGroup("qq_group"),

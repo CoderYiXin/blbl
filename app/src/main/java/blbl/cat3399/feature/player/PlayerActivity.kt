@@ -77,6 +77,7 @@ import blbl.cat3399.feature.player.engine.BlblPlayerEngine
 import blbl.cat3399.feature.player.engine.ExoPlayerEngine
 import blbl.cat3399.feature.player.engine.IjkPlayerEngine
 import blbl.cat3399.feature.player.engine.IjkPlayerPlugin
+import blbl.cat3399.feature.player.engine.IjkPlayerPluginUi
 import blbl.cat3399.feature.player.engine.PlayerEngineKind
 import blbl.cat3399.feature.player.engine.PlaybackSource
 import blbl.cat3399.feature.settings.SettingsActivity
@@ -827,7 +828,17 @@ class PlayerActivity : BaseActivity() {
         val desiredEngineKind = session.engineKind
         val engineKind =
             if (desiredEngineKind == PlayerEngineKind.IjkPlayer && !IjkPlayerPlugin.isInstalled(this)) {
-                AppToast.showLong(this, "IjkPlayer 插件未安装，已回退到 ExoPlayer")
+                val status = IjkPlayerPlugin.status(this)
+                val text =
+                    if (status == IjkPlayerPlugin.InstallStatus.NeedsUpdate) {
+                        "IjkPlayer 插件需要更新，已临时使用 ExoPlayer"
+                    } else {
+                        "IjkPlayer 插件未安装，已临时使用 ExoPlayer"
+                    }
+                AppToast.showLong(this, text)
+                IjkPlayerPluginUi.ensureInstalled(this) {
+                    if (!isFinishing && !isDestroyed) recreate()
+                }
                 PlayerEngineKind.ExoPlayer
             } else {
                 desiredEngineKind

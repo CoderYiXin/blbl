@@ -226,7 +226,17 @@ class LivePlayerActivity : BaseActivity() {
         val desiredEngineKind = session.engineKind
         val engineKind =
             if (desiredEngineKind == PlayerEngineKind.IjkPlayer && !IjkPlayerPlugin.isInstalled(this)) {
-                AppToast.showLong(this, "IjkPlayer 插件未安装，已回退到 ExoPlayer")
+                val status = IjkPlayerPlugin.status(this)
+                val text =
+                    if (status == IjkPlayerPlugin.InstallStatus.NeedsUpdate) {
+                        "IjkPlayer 插件需要更新，已临时使用 ExoPlayer"
+                    } else {
+                        "IjkPlayer 插件未安装，已临时使用 ExoPlayer"
+                    }
+                AppToast.showLong(this, text)
+                IjkPlayerPluginUi.ensureInstalled(this) {
+                    if (!isFinishing && !isDestroyed) recreate()
+                }
                 PlayerEngineKind.ExoPlayer
             } else {
                 desiredEngineKind
