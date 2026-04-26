@@ -145,8 +145,14 @@ class PlayerActivity : BaseActivity() {
     internal var holdPrevPlayWhenReady: Boolean = false
     internal var holdScrubPreviewPosMs: Long? = null
     internal var keySeekPreviewPosMs: Long? = null
-    internal var keySeekBufferingOverlaySuppressedUntilMs: Long = 0L
-    internal var keySeekBufferingOverlayEligibleAtMs: Long = 0L
+    internal val bufferingOverlayController: PlayerBufferingOverlayController by lazy {
+        PlayerBufferingOverlayController(
+            context = this,
+            bindingProvider = { if (::binding.isInitialized) binding else null },
+            scope = lifecycleScope,
+            playbackStateProvider = { player?.playbackState },
+        )
+    }
     internal var loadJob: kotlinx.coroutines.Job? = null
     internal var lastEndedActionAtMs: Long = 0L
     internal var playbackUncaughtHandler: CoroutineExceptionHandler? = null
@@ -532,10 +538,6 @@ class PlayerActivity : BaseActivity() {
 
     internal var trace: PlaybackTrace? = null
     internal var traceFirstFrameLogged: Boolean = false
-    internal val bufferingSpeedMeter: BufferingSpeedMeter = BufferingSpeedMeter()
-    @Volatile internal var bufferingSpeedTrackingEnabled: Boolean = false
-    internal var bufferingStateStartedAtMs: Long = 0L
-
     private fun requestDecoderReleaseOnStop(reason: String) {
         if (reason.isBlank()) return
         val engine = player as? ExoPlayerEngine ?: return
@@ -945,11 +947,9 @@ class PlayerActivity : BaseActivity() {
                         debug.rebufferCount++
                     }
                     if (playbackState == Player.STATE_BUFFERING) {
-                        if (debug.lastPlaybackState != Player.STATE_BUFFERING) {
-                            bufferingStateStartedAtMs = SystemClock.elapsedRealtime()
-                            bufferingSpeedMeter.reset()
-                        }
-                        bufferingSpeedTrackingEnabled = true
+                        bufferingOverlayController.onBufferingStarted(
+                            resetSpeedSample = debug.lastPlaybackState != Player.STATE_BUFFERING,
+                        )
                     } else {
                         resetBufferingOverlayState()
                     }
