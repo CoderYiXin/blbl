@@ -234,7 +234,8 @@ object SettingsText {
 
     fun hardDecoderSupportText(): String {
         val support = runCatching { queryHardDecoderSupport() }.getOrNull() ?: return "-"
-        return "H264 ${markSupport(support.h264)} / H265 ${markSupport(support.h265)} / AV1 ${markSupport(support.av1)}"
+        return "H264 ${markSupport(support.h264)} / H265 ${markSupport(support.h265)} / AV1 ${markSupport(support.av1)} / " +
+            "DV ${markSupport(support.dolbyVision)} / Atmos ${markSupport(support.dolbyAtmos)}"
     }
 
     fun formatBytes(bytes: Long): String {
@@ -254,6 +255,8 @@ object SettingsText {
         var h264 = false
         var h265 = false
         var av1 = false
+        var dolbyVision = false
+        var dolbyAtmos = false
         for (codecInfo in MediaCodecList(MediaCodecList.ALL_CODECS).codecInfos) {
             if (codecInfo.isEncoder) continue
             if (!isHardwareDecoder(codecInfo)) continue
@@ -262,11 +265,19 @@ object SettingsText {
                     "video/avc" -> h264 = true
                     "video/hevc" -> h265 = true
                     "video/av01", "video/av1" -> av1 = true
+                    MIME_VIDEO_DOLBY_VISION -> dolbyVision = true
+                    in DOLBY_ATMOS_MIME_TYPES -> dolbyAtmos = true
                 }
             }
-            if (h264 && h265 && av1) break
+            if (h264 && h265 && av1 && dolbyVision && dolbyAtmos) break
         }
-        return HardDecoderSupport(h264 = h264, h265 = h265, av1 = av1)
+        return HardDecoderSupport(
+            h264 = h264,
+            h265 = h265,
+            av1 = av1,
+            dolbyVision = dolbyVision,
+            dolbyAtmos = dolbyAtmos,
+        )
     }
 
     private fun isHardwareDecoder(codecInfo: MediaCodecInfo): Boolean {
@@ -288,7 +299,19 @@ object SettingsText {
         val h264: Boolean,
         val h265: Boolean,
         val av1: Boolean,
+        val dolbyVision: Boolean,
+        val dolbyAtmos: Boolean,
     )
+
+    private const val MIME_VIDEO_DOLBY_VISION = "video/dolby-vision"
+
+    private val DOLBY_ATMOS_MIME_TYPES =
+        setOf(
+            "audio/eac3-joc",
+            "audio/ac4",
+            "audio/vnd.dolby.mlp",
+            "audio/vnd.dolby.mat",
+        )
 
     fun playbackModeText(code: String): String = PlayerPlaybackModes.label(code)
 
