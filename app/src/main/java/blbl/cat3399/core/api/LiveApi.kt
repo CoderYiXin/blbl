@@ -206,6 +206,36 @@ internal object LiveApi {
         )
     }
 
+    suspend fun liveRoomEntryAction(roomId: Long) {
+        if (roomId <= 0L) error("live_room_entry_invalid_room_id")
+        val csrf = BiliClient.cookies.getCookieValue("bili_jct").orEmpty().trim()
+        if (csrf.isBlank()) throw BiliApiException(apiCode = -111, apiMessage = "missing_csrf")
+        val url =
+            BiliClient.withQuery(
+                "https://api.live.bilibili.com/xlive/web-room/v1/index/roomEntryAction",
+                mapOf("csrf" to csrf),
+            )
+        val json =
+            BiliClient.postFormJson(
+                url,
+                form =
+                    mapOf(
+                        "room_id" to roomId.toString(),
+                        "platform" to "pc",
+                    ),
+                headers =
+                    mapOf(
+                        "Referer" to "https://live.bilibili.com/$roomId",
+                        "Origin" to "https://live.bilibili.com",
+                    ),
+            )
+        val code = json.optInt("code", 0)
+        if (code != 0) {
+            val msg = json.optString("message", json.optString("msg", json.optString("error", "")))
+            throw BiliApiException(apiCode = code, apiMessage = msg)
+        }
+    }
+
     suspend fun livePlayUrl(
         roomId: Long,
         qn: Int,

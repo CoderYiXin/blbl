@@ -111,6 +111,7 @@ class LivePlayerActivity : BaseActivity() {
     private val shortcutPrevDanmakuAreaByKey = HashMap<Int, Float>()
     private var debugJob: Job? = null
     private var autoFailoverJob: Job? = null
+    private var liveEntryReportedRoomId: Long = 0L
     private var finishOnBackKeyUp: Boolean = false
     private var controlsVisible: Boolean = false
     private var lastInteractionAtMs: Long = 0L
@@ -1457,6 +1458,7 @@ class LivePlayerActivity : BaseActivity() {
             engine.setSource(PlaybackSource.Live(url = pickedLine.url))
             engine.prepare()
             engine.playWhenReady = true
+            reportLiveRoomEntry(realRoomId)
 
             if (initial) connectDanmaku()
         } catch (t: Throwable) {
@@ -1858,6 +1860,21 @@ class LivePlayerActivity : BaseActivity() {
             } else {
                 sb.append(" inv=").append(dm.invalidateTopPx).append('-').append(dm.invalidateBottomPx)
             }
+        }
+    }
+
+    private fun reportLiveRoomEntry(roomId: Long) {
+        if (roomId <= 0L || lastLiveStatus != 1) return
+        if (liveEntryReportedRoomId == roomId) return
+        liveEntryReportedRoomId = roomId
+        lifecycleScope.launch {
+            runCatching { BiliApi.liveRoomEntryAction(roomId) }
+                .onSuccess { AppLog.d("LiveReport", "entry ok room=$roomId") }
+                .onFailure { t ->
+                    if (t is CancellationException) throw t
+                    if (liveEntryReportedRoomId == roomId) liveEntryReportedRoomId = 0L
+                    AppLog.w("LiveReport", "entry failed room=$roomId", t)
+                }
         }
     }
 
