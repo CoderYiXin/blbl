@@ -336,8 +336,8 @@ class PlayerActivity : BaseActivity() {
 
     @Volatile
     private var exitTraceNavTargetFirstPreDrawLogged: Boolean = false
-    private var decoderReleaseRequestedOnStopReason: String? = null
-    private var decoderReleaseRequestedResumePlayWhenReady: Boolean? = null
+    private var transientPlaybackResumeRequested: Boolean? = null
+    private var decoderReleaseRequestedOnStop: Boolean = false
     private var resumeAfterDecoderRelease: Boolean = false
     private var resumeAfterDecoderReleasePositionMs: Long = 0L
     private var resumeAfterDecoderReleasePlayWhenReady: Boolean = true
@@ -354,7 +354,7 @@ class PlayerActivity : BaseActivity() {
     internal var currentVideoContentHeight: Int? = null
 
     private fun isPlayerTeardownInProgress(): Boolean {
-        return exitCleanupRequested || isFinishing || isDestroyed || decoderReleaseRequestedOnStopReason != null || resumeAfterDecoderRelease
+        return exitCleanupRequested || isFinishing || isDestroyed || decoderReleaseRequestedOnStop || resumeAfterDecoderRelease
     }
 
     private fun shouldSuppressPlayerError(error: Throwable): Boolean {
@@ -365,7 +365,7 @@ class PlayerActivity : BaseActivity() {
         AppLog.i(
             "Player",
             "ignorePlayerError teardown=1 finishing=${if (isFinishing) 1 else 0} destroyed=${if (isDestroyed) 1 else 0} " +
-                "exitCleanup=${if (exitCleanupRequested) 1 else 0} releaseOnStop=${decoderReleaseRequestedOnStopReason.orEmpty()} " +
+                "exitCleanup=${if (exitCleanupRequested) 1 else 0} releaseOnStop=${if (decoderReleaseRequestedOnStop) 1 else 0} " +
                 "resumeAfterRelease=${if (resumeAfterDecoderRelease) 1 else 0} type=$errorLabel",
         )
         return true
@@ -537,33 +537,33 @@ class PlayerActivity : BaseActivity() {
 
     internal var trace: PlaybackTrace? = null
     internal var traceFirstFrameLogged: Boolean = false
-    internal fun requestDecoderReleaseBeforeOpenUpDetail() {
-        requestDecoderReleaseOnStop(reason = "up_detail")
+
+    internal fun prepareTransientPlaybackExit() {
+        val engine = player ?: return
+        val shouldResume = engine.isPlaying || engine.playWhenReady
+        transientPlaybackResumeRequested = shouldResume
+        decoderReleaseRequestedOnStop = engine is ExoPlayerEngine
+        trace?.log(
+            "player:transientExit",
+            "resume=${if (shouldResume) 1 else 0} releaseOnStop=${if (decoderReleaseRequestedOnStop) 1 else 0}",
+        )
+        engine.pause()
     }
 
-    private fun requestDecoderReleaseOnStop(reason: String) {
-        if (reason.isBlank()) return
-        val engine = player as? ExoPlayerEngine ?: return
-        decoderReleaseRequestedOnStopReason = reason
-        // Snapshot the pre-navigation auto-play intent before onPause() forces pause().
-        decoderReleaseRequestedResumePlayWhenReady = engine.isPlaying || engine.playWhenReady
-        trace?.log("exo:releaseOnStop:request", "reason=$reason")
-    }
-
-    private fun releaseDecoderNowForBackground(reason: String) {
+    private fun releaseDecoderNowForBackground() {
         val engine = player ?: return
         if (engine !is ExoPlayerEngine) return
         if (exitCleanupRequested || isFinishing || isDestroyed) return
         val pos = engine.currentPosition.coerceAtLeast(0L)
         val shouldPlayAfterReturn =
-            decoderReleaseRequestedResumePlayWhenReady
+            transientPlaybackResumeRequested
                 ?: (engine.isPlaying || engine.playWhenReady)
-        decoderReleaseRequestedResumePlayWhenReady = null
-        trace?.log("exo:releaseOnStop:do", "reason=$reason pos=${pos}ms")
+        transientPlaybackResumeRequested = null
+        trace?.log("exo:releaseOnStop:do", "pos=${pos}ms")
 
         // Stop progress reporting before stopping the player (stop() resets currentPosition).
-        stopReportProgressLoop(flush = false, reason = "nav_$reason")
-        enqueueExitProgressReport(reason = "nav_$reason")
+        stopReportProgressLoop(flush = false, reason = "transient_nav")
+        enqueueExitProgressReport(reason = "transient_nav")
 
         resumeAfterDecoderRelease = true
         resumeAfterDecoderReleasePositionMs = pos
@@ -582,6 +582,8 @@ class PlayerActivity : BaseActivity() {
         if (exitCleanupRequested) return
         exitCleanupRequested = true
         exitCleanupReason = reason
+        transientPlaybackResumeRequested = null
+        decoderReleaseRequestedOnStop = false
         cancelPlayUrlAutoRefresh(reason = "exit_cleanup:$reason")
         trace?.log("activity:exit:request", "reason=$reason")
         exitTraceLog(
@@ -695,7 +697,7 @@ class PlayerActivity : BaseActivity() {
                 binding = binding,
                 isCardVisible = { isTopBarContentVisible() },
                 keepControlsVisible = { setControlsVisible(true) },
-                beforeOpenUpDetail = { requestDecoderReleaseBeforeOpenUpDetail() },
+                beforeOpenUpDetail = { prepareTransientPlaybackExit() },
                 onUiUpdated = {
                     updatePlayerInfoUpUi()
                     updateUpButton()
@@ -1532,6 +1534,7 @@ class PlayerActivity : BaseActivity() {
         binding.btnBack.isFocusableInTouchMode = false
         updatePersistentBottomProgressBarVisibility()
         (binding.recyclerSettings.adapter as? PlayerSettingsAdapter)?.let { refreshSettings(it) }
+        consumeTransientPlaybackResumeIfNeeded()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -1854,9 +1857,11 @@ class PlayerActivity : BaseActivity() {
             )
         }
         trace?.log("activity:onStop")
-        val releaseReason = decoderReleaseRequestedOnStopReason
-        decoderReleaseRequestedOnStopReason = null
-        if (releaseReason == null) decoderReleaseRequestedResumePlayWhenReady = null
+        val releaseDecoderOnStop = decoderReleaseRequestedOnStop
+        decoderReleaseRequestedOnStop = false
+        if (isChangingConfigurations) {
+            transientPlaybackResumeRequested = null
+        }
         super.onStop()
         player?.pause()
         if ((exitCleanupRequested || isFinishing) && !isChangingConfigurations) {
@@ -1869,8 +1874,8 @@ class PlayerActivity : BaseActivity() {
                 exitTraceLog("exitCleanup:detachView:onStop", "cost=${detachCostMs}ms")
             }
         }
-        if (releaseReason != null && !isChangingConfigurations) {
-            releaseDecoderNowForBackground(reason = releaseReason)
+        if (releaseDecoderOnStop && !isChangingConfigurations) {
+            releaseDecoderNowForBackground()
         } else {
             val flush = !isFinishing && !isChangingConfigurations && !exitCleanupRequested
             stopReportProgressLoop(flush = flush, reason = if (flush) "stop" else "stop_skip")
@@ -1880,7 +1885,7 @@ class PlayerActivity : BaseActivity() {
     override fun onStart() {
         super.onStart()
         val engine = player ?: return
-        val exo = (engine as? ExoPlayerEngine)?.exoPlayer ?: return
+        val exo = (engine as? ExoPlayerEngine)?.exoPlayer
         if (!resumeAfterDecoderRelease) return
         if (exitCleanupRequested || isFinishing || isDestroyed) return
 
@@ -1891,7 +1896,7 @@ class PlayerActivity : BaseActivity() {
         resumeAfterDecoderReleasePlayWhenReady = true
         trace?.log("exo:releaseOnStop:resume", "pos=${pos}ms")
 
-        if (::binding.isInitialized && binding.playerView.player == null) {
+        if (exo != null && ::binding.isInitialized && binding.playerView.player == null) {
             binding.playerView.player = exo
         }
         resumeExpiredUrlReloadArmed = true
@@ -1899,6 +1904,17 @@ class PlayerActivity : BaseActivity() {
         engine.playWhenReady = playWhenReadyAfterReturn
         engine.prepare()
         if (pos > 0L) engine.seekTo(pos)
+    }
+
+    private fun consumeTransientPlaybackResumeIfNeeded() {
+        val shouldResume = transientPlaybackResumeRequested ?: return
+        transientPlaybackResumeRequested = null
+        if (exitCleanupRequested || isFinishing || isDestroyed || isChangingConfigurations) return
+        val engine = player ?: return
+        if (shouldResume) {
+            trace?.log("player:transientResume")
+            engine.playWhenReady = true
+        }
     }
 
     override fun onPause() {
@@ -2012,7 +2028,7 @@ class PlayerActivity : BaseActivity() {
     internal fun openCurrentMediaDetail() {
         val epId = currentEpId
         if (epId != null && epId > 0L) {
-            requestDecoderReleaseOnStop(reason = "video_detail")
+            prepareTransientPlaybackExit()
             startActivity(
                 Intent(this, BangumiDetailActivity::class.java)
                     .putExtra(BangumiDetailActivity.EXTRA_EP_ID, epId)
@@ -2029,7 +2045,7 @@ class PlayerActivity : BaseActivity() {
             return
         }
 
-        requestDecoderReleaseOnStop(reason = "video_detail")
+        prepareTransientPlaybackExit()
         val title =
             currentMainTitle?.trim().orEmpty().ifBlank {
                 binding.tvTitle.text?.toString()?.trim().orEmpty()

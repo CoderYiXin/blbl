@@ -154,6 +154,7 @@ class LivePlayerActivity : BaseActivity() {
 
     private var lastPlay: BiliApi.LivePlayUrl? = null
     private var lastLiveStatus: Int = 0
+    private var transientPlaybackResumeRequested: Boolean? = null
 
     private val chatItems = ArrayDeque<LiveChatAdapter.Item>()
     private val chatMax = 200
@@ -179,7 +180,7 @@ class LivePlayerActivity : BaseActivity() {
                 binding = binding,
                 isCardVisible = { controlsVisible },
                 keepControlsVisible = { setControlsVisible(true) },
-                beforeOpenUpDetail = { runCatching { player?.pause() } },
+                beforeOpenUpDetail = { prepareTransientPlaybackExit() },
             )
         setContentView(binding.root)
         Immersive.apply(this, prefs.fullscreenEnabled)
@@ -431,11 +432,29 @@ class LivePlayerActivity : BaseActivity() {
         lifecycleScope.launch { loadAndPlay(initial = true) }
     }
 
+    private fun prepareTransientPlaybackExit() {
+        val engine = player ?: return
+        val shouldResume = engine.isPlaying || engine.playWhenReady
+        transientPlaybackResumeRequested = shouldResume
+        engine.pause()
+    }
+
+    private fun consumeTransientPlaybackResumeIfNeeded() {
+        val shouldResume = transientPlaybackResumeRequested ?: return
+        transientPlaybackResumeRequested = null
+        if (exitRequested || isFinishing || isDestroyed || isChangingConfigurations) return
+        val engine = player ?: return
+        if (shouldResume) {
+            engine.playWhenReady = true
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         PlayerOsdSizing.applyTheme(this)
         PlayerUiMode.applyLive(this, binding)
         initTouchGestures()
+        consumeTransientPlaybackResumeIfNeeded()
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -481,6 +500,7 @@ class LivePlayerActivity : BaseActivity() {
     override fun onDestroy() {
         val t0 = SystemClock.elapsedRealtime()
         AppLog.i("LivePlayer", "activity:onDestroy:start")
+        transientPlaybackResumeRequested = null
         messageClient?.close()
         messageClient = null
         releaseTouchGestures()
@@ -507,6 +527,7 @@ class LivePlayerActivity : BaseActivity() {
 
     override fun finish() {
         exitRequested = true
+        transientPlaybackResumeRequested = null
         autoFailoverJob?.cancel()
         autoFailoverInFlight = false
         runCatching { player?.pause() }
