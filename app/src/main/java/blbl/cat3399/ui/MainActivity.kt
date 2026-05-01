@@ -3,11 +3,15 @@ package blbl.cat3399.ui
 import android.content.Intent
 import android.os.Bundle
 import android.os.SystemClock
+import android.util.TypedValue
 import android.view.KeyEvent
+import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewGroup.MarginLayoutParams
 import android.view.ViewTreeObserver
+import android.widget.ScrollView
+import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.constraintlayout.widget.ConstraintLayout
 import androidx.lifecycle.Lifecycle
@@ -18,6 +22,7 @@ import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.StaggeredGridLayoutManager
 import androidx.recyclerview.widget.SimpleItemAnimator
+import blbl.cat3399.BuildConfig
 import blbl.cat3399.R
 import blbl.cat3399.core.api.BiliApi
 import blbl.cat3399.core.log.AppLog
@@ -34,7 +39,11 @@ import blbl.cat3399.core.ui.TabContentSwitchFocusHost
 import blbl.cat3399.core.ui.cloneInUserScale
 import blbl.cat3399.core.ui.dispatchToAncestorDpadItemKeyHandler
 import blbl.cat3399.core.ui.popup.AppPopup
+import blbl.cat3399.core.ui.popup.PopupAction
+import blbl.cat3399.core.ui.popup.PopupActionRole
 import blbl.cat3399.core.ui.popup.PopupHandle
+import blbl.cat3399.core.update.ApkUpdateFlow
+import blbl.cat3399.core.update.ApkUpdater
 import blbl.cat3399.databinding.ActivityMainBinding
 import blbl.cat3399.databinding.DialogUserInfoBinding
 import blbl.cat3399.feature.following.FollowingListActivity
@@ -42,6 +51,7 @@ import blbl.cat3399.feature.login.QrLoginActivity
 import blbl.cat3399.feature.player.engine.IjkPlayerPlugin
 import blbl.cat3399.feature.player.engine.IjkPlayerPluginUi
 import blbl.cat3399.feature.settings.SettingsActivity
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 import org.json.JSONObject
@@ -61,7 +71,12 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
     private var disclaimerPopup: PopupHandle? = null
     private var crashPromptPopup: PopupHandle? = null
     private var ijkKernelPromptPopup: PopupHandle? = null
+    private var autoUpdatePromptPopup: PopupHandle? = null
     private var ijkKernelPromptShown: Boolean = false
+    private var autoUpdateCheckStarted: Boolean = false
+    private var autoUpdatePromptShownVersion: String? = null
+    private var pendingAutoUpdate: ApkUpdater.RemoteUpdate? = null
+    private var autoUpdateCheckJob: Job? = null
     private lateinit var userInfoOverlay: DialogUserInfoBinding
     private val userInfoReturnFocus = FocusReturn()
     private var userInfoLoadJob: Job? = null
@@ -175,6 +190,7 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
 
         refreshSidebarUser()
         showFirstLaunchDisclaimerIfNeeded()
+        maybeStartAutoUpdateCheck()
     }
 
     private fun resolveLaunchNavId(): Int {
@@ -195,6 +211,8 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
         refreshSidebarUser()
         showLastCrashPromptIfNeeded()
         showIjkKernelUpdatePromptIfNeeded()
+        maybeStartAutoUpdateCheck()
+        showAutoUpdatePromptIfReady()
     }
 
     override fun onPause() {
@@ -748,6 +766,7 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
                 onDismiss = {
                     disclaimerPopup = null
                     if (!BiliClient.prefs.disclaimerAccepted && !isChangingConfigurations) finish()
+                    maybeStartAutoUpdateCheck()
                     showIjkKernelUpdatePromptIfNeeded()
                 },
             )
@@ -778,9 +797,15 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
     }
 
     private fun showIjkKernelUpdatePromptIfNeeded() {
-        if (ijkKernelPromptShown) return
+        if (ijkKernelPromptShown) {
+            showAutoUpdatePromptIfReady()
+            return
+        }
         if (!BiliClient.prefs.disclaimerAccepted) return
-        if (BiliClient.prefs.playerEngineKind != AppPrefs.PLAYER_ENGINE_IJK) return
+        if (BiliClient.prefs.playerEngineKind != AppPrefs.PLAYER_ENGINE_IJK) {
+            showAutoUpdatePromptIfReady()
+            return
+        }
         if (disclaimerPopup?.isShowing == true) return
         if (crashPromptPopup?.isShowing == true) return
         if (ijkKernelPromptPopup?.isShowing == true) return
@@ -794,7 +819,10 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
                 IjkPlayerPlugin.InstallStatus.NotInstalled ->
                     "播放器内核未安装" to "当前默认播放器内核是 IjkPlayer，需要先下载播放器内核。"
 
-                else -> return
+                else -> {
+                    showAutoUpdatePromptIfReady()
+                    return
+                }
             }
 
         ijkKernelPromptShown = true
@@ -810,8 +838,87 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
                 },
                 onDismiss = {
                     ijkKernelPromptPopup = null
+                    showAutoUpdatePromptIfReady()
                 },
             )
+    }
+
+    private fun maybeStartAutoUpdateCheck() {
+        if (!BiliClient.prefs.disclaimerAccepted) return
+        if (!BiliClient.prefs.autoUpdateCheckEnabled) return
+        if (autoUpdateCheckStarted || autoUpdateCheckJob?.isActive == true) return
+
+        autoUpdateCheckStarted = true
+        autoUpdateCheckJob =
+            lifecycleScope.launch {
+                try {
+                    val update = ApkUpdater.fetchLatestUpdate()
+                    if (!ApkUpdater.isRemoteNewer(update.versionName, BuildConfig.VERSION_NAME)) return@launch
+                    if (BiliClient.prefs.autoUpdateIgnoredVersionName == update.versionName) return@launch
+                    pendingAutoUpdate = update
+                    showAutoUpdatePromptIfReady()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (t: Throwable) {
+                    AppLog.w("Update", "auto update check failed", t)
+                }
+            }
+    }
+
+    private fun showAutoUpdatePromptIfReady() {
+        if (!BiliClient.prefs.autoUpdateCheckEnabled) return
+        if (!BiliClient.prefs.disclaimerAccepted) return
+        if (disclaimerPopup?.isShowing == true) return
+        if (crashPromptPopup?.isShowing == true) return
+        if (ijkKernelPromptPopup?.isShowing == true) return
+        if (autoUpdatePromptPopup?.isShowing == true) return
+
+        val update = pendingAutoUpdate ?: return
+        if (!ApkUpdater.isRemoteNewer(update.versionName, BuildConfig.VERSION_NAME)) return
+        if (BiliClient.prefs.autoUpdateIgnoredVersionName == update.versionName) return
+        if (autoUpdatePromptShownVersion == update.versionName) return
+        autoUpdatePromptShownVersion = update.versionName
+
+        autoUpdatePromptPopup =
+            AppPopup.custom(
+                context = this,
+                title = "发现新版本 ${update.versionName}",
+                cancelable = true,
+                actions =
+                    listOf(
+                        PopupAction(role = PopupActionRole.NEGATIVE, text = "本次关闭"),
+                        PopupAction(role = PopupActionRole.NEUTRAL, text = "此版本不再提醒") {
+                            BiliClient.prefs.autoUpdateIgnoredVersionName = update.versionName
+                            pendingAutoUpdate = null
+                        },
+                        PopupAction(role = PopupActionRole.POSITIVE, text = "立即更新") {
+                            ApkUpdateFlow.startDownloadAndInstall(
+                                activity = this,
+                                latestVersionHint = update.versionName,
+                            )
+                        },
+                    ),
+                preferredActionRole = PopupActionRole.POSITIVE,
+                onDismiss = {
+                    autoUpdatePromptPopup = null
+                },
+            ) { dialogContext ->
+                val scroll =
+                    ScrollView(dialogContext).apply {
+                        isFocusable = false
+                        isFocusableInTouchMode = false
+                        descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+                        overScrollMode = View.OVER_SCROLL_IF_CONTENT_SCROLLS
+                    }
+                val tv =
+                    LayoutInflater.from(dialogContext)
+                        .inflate(R.layout.view_popup_message, scroll, false) as TextView
+                tv.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18f)
+                tv.setLineSpacing(2f, 1.05f)
+                tv.text = update.displayChangelog
+                scroll.addView(tv)
+                scroll
+            }
     }
 
     private fun refreshSidebarUser() {

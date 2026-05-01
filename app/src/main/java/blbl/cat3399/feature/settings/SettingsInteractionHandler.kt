@@ -41,6 +41,7 @@ import blbl.cat3399.core.ui.Immersive
 import blbl.cat3399.core.ui.popup.AppPopup
 import blbl.cat3399.core.ui.popup.PopupAction
 import blbl.cat3399.core.ui.popup.PopupActionRole
+import blbl.cat3399.core.update.ApkUpdateFlow
 import blbl.cat3399.core.update.ApkUpdater
 import blbl.cat3399.feature.player.engine.IjkPlayerPlugin
 import blbl.cat3399.feature.player.engine.IjkPlayerPluginUi
@@ -714,6 +715,12 @@ class SettingsInteractionHandler(
 
             SettingId.UploadLogs -> {
                 showUploadLogsDialog()
+            }
+
+            SettingId.AutoUpdateCheckEnabled -> {
+                prefs.autoUpdateCheckEnabled = !prefs.autoUpdateCheckEnabled
+                AppToast.show(activity, "自动检查更新：${if (prefs.autoUpdateCheckEnabled) "开" else "关"}")
+                renderer.refreshSection(entry.id)
             }
 
             SettingId.FullscreenEnabled -> {
@@ -2577,7 +2584,7 @@ class SettingsInteractionHandler(
         testUpdateCheckJob =
             activity.lifecycleScope.launch {
                 try {
-                    val latest = ApkUpdater.fetchLatestVersionName()
+                    val latest = ApkUpdater.fetchLatestUpdate().versionName
                     val current = BuildConfig.VERSION_NAME
                     state.testUpdateCheckState =
                         if (ApkUpdater.isRemoteNewer(latest, current)) {
@@ -2602,82 +2609,21 @@ class SettingsInteractionHandler(
             return
         }
 
-        val now = System.currentTimeMillis()
-        val cooldownLeftMs = ApkUpdater.cooldownLeftMs(now)
-        if (cooldownLeftMs > 0) {
-            AppToast.show(activity, "操作太频繁，请稍后再试（${(cooldownLeftMs / 1000).coerceAtLeast(1)}s）")
-            return
-        }
-
-        val popup =
-            AppPopup.progress(
-                context = activity,
-                title = "下载更新",
-                status = "检查更新…",
-                negativeText = "取消",
-                cancelable = false,
-                onNegative = { testUpdateJob?.cancel() },
-            )
-
         testUpdateJob =
-            activity.lifecycleScope.launch {
-                try {
-                    val currentVersion = BuildConfig.VERSION_NAME
-                    val latestVersion = latestVersionHint ?: ApkUpdater.fetchLatestVersionName()
-                    if (!ApkUpdater.isRemoteNewer(latestVersion, currentVersion)) {
-                        state.testUpdateCheckState = TestUpdateCheckState.Latest(latestVersion)
-                        state.testUpdateCheckedAtMs = System.currentTimeMillis()
-                        renderer.refreshAboutSectionKeepPosition()
-                        popup?.dismiss()
-                        AppToast.show(activity, "已是最新版（当前：$currentVersion）")
-                        return@launch
+            ApkUpdateFlow.startDownloadAndInstall(
+                activity = activity,
+                latestVersionHint = latestVersionHint,
+            ) { latestVersion, isNewer ->
+                state.testUpdateCheckState =
+                    if (isNewer) {
+                        TestUpdateCheckState.UpdateAvailable(latestVersion)
+                    } else {
+                        TestUpdateCheckState.Latest(latestVersion)
                     }
-
-                    state.testUpdateCheckState = TestUpdateCheckState.UpdateAvailable(latestVersion)
-                    state.testUpdateCheckedAtMs = System.currentTimeMillis()
-                    renderer.refreshAboutSectionKeepPosition()
-
-                    popup?.updateStatus("准备下载…（最新：$latestVersion）")
-                    popup?.updateProgress(null)
-
-                    ApkUpdater.markStarted(now)
-                    val apkFile =
-                        ApkUpdater.downloadApkToCache(
-                            context = activity,
-                            url = ApkUpdater.TEST_APK_URL,
-                        ) { dlState ->
-                            when (dlState) {
-                                ApkUpdater.Progress.Connecting -> {
-                                    popup?.updateProgress(null)
-                                    popup?.updateStatus("连接中…")
-                                }
-
-                                is ApkUpdater.Progress.Downloading -> {
-                                    val pct = dlState.percent
-                                    if (pct != null) {
-                                        popup?.updateProgress(pct.coerceIn(0, 100))
-                                        popup?.updateStatus("下载中… ${pct.coerceIn(0, 100)}% ${dlState.hint}")
-                                    } else {
-                                        popup?.updateProgress(null)
-                                        popup?.updateStatus("下载中… ${dlState.hint}")
-                                    }
-                                }
-                            }
-                        }
-
-                    popup?.updateStatus("准备安装…")
-                    popup?.updateProgress(null)
-                    popup?.dismiss()
-                    ApkUpdater.installApk(activity, apkFile)
-                } catch (_: CancellationException) {
-                    popup?.dismiss()
-                    AppToast.show(activity, "已取消更新")
-                } catch (t: Throwable) {
-                    AppLog.w("TestUpdate", "update failed: ${t.message}")
-                    popup?.dismiss()
-                    AppToast.showLong(activity, "更新失败：${t.message ?: "未知错误"}")
-                }
+                state.testUpdateCheckedAtMs = System.currentTimeMillis()
+                renderer.refreshAboutSectionKeepPosition()
             }
+                ?: return
     }
 
     private fun showProjectDialog() {
