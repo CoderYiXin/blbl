@@ -42,6 +42,11 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 
 class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler {
+    private enum class RefreshPresentation {
+        ResetToServerOrder,
+        PreserveCurrentOrder,
+    }
+
     private var _binding: FragmentVideoGridBinding? = null
     private val binding get() = _binding!!
 
@@ -244,7 +249,10 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
         paging.reset()
         loadedKeys.clear()
         dpadGridController?.clearPendingFocusAfterLoadMore()
-        loadNextPage(isRefresh = true)
+        loadNextPage(
+            isRefresh = true,
+            refreshPresentation = RefreshPresentation.PreserveCurrentOrder,
+        )
     }
 
     private data class FetchedPage(
@@ -252,7 +260,11 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
         val nextCursor: BiliApi.HistoryCursor?,
     )
 
-    private fun loadNextPage(isRefresh: Boolean = false) {
+    private fun loadNextPage(
+        isRefresh: Boolean = false,
+        refreshPresentation: RefreshPresentation = RefreshPresentation.ResetToServerOrder,
+    ) {
+        val preserveCurrentOrderRefresh = isRefresh && refreshPresentation == RefreshPresentation.PreserveCurrentOrder
         val startSnap = paging.snapshot()
         if (startSnap.isLoading || startSnap.endReached) return
         val startGen = startSnap.generation
@@ -295,7 +307,11 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
                 val applied = result.appliedOrNull() ?: return@launch
                 if (applied.items.isEmpty()) {
                     if (applied.isRefresh) {
-                        adapter.submit(emptyList())
+                        if (preserveCurrentOrderRefresh) {
+                            resetLoadedKeysFromAdapter()
+                        } else {
+                            adapter.submit(emptyList())
+                        }
                     }
                     if (applied.isRefresh && pendingFocusFirstItemAfterRefresh) {
                         pendingFocusFirstItemAfterRefresh = false
@@ -311,8 +327,18 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
                     }
                     return@launch
                 }
-                applied.items.forEach { loadedKeys.add(it.stableKey()) }
-                if (applied.isRefresh) adapter.submit(applied.items) else adapter.append(applied.items)
+                if (applied.isRefresh) {
+                    if (preserveCurrentOrderRefresh) {
+                        adapter.updateExistingEntriesPreservingOrder(applied.items)
+                        resetLoadedKeysFromAdapter()
+                    } else {
+                        applied.items.forEach { loadedKeys.add(it.stableKey()) }
+                        adapter.submit(applied.items)
+                    }
+                } else {
+                    applied.items.forEach { loadedKeys.add(it.stableKey()) }
+                    adapter.append(applied.items)
+                }
                 _binding?.recycler?.postIfAlive(isAlive = { _binding != null }) {
                     if (pendingFocusFirstItemAfterRefresh && applied.isRefresh) {
                         pendingFocusFirstItemAfterRefresh = false
@@ -331,12 +357,18 @@ class MyHistoryFragment : Fragment(), MyTabSwitchFocusTarget, RefreshKeyHandler 
 
             } catch (t: Throwable) {
                 if (t is CancellationException) throw t
+                if (preserveCurrentOrderRefresh) resetLoadedKeysFromAdapter()
                 AppLog.e("MyHistory", "load failed", t)
                 context?.let { AppToast.show(it, "加载失败，可查看 Logcat(标签 BLBL)") }
             } finally {
                 if (paging.snapshot().generation == startGen) _binding?.swipeRefresh?.isRefreshing = false
             }
         }
+    }
+
+    private fun resetLoadedKeysFromAdapter() {
+        loadedKeys.clear()
+        loadedKeys.addAll(adapter.stableKeysSnapshot())
     }
 
     override fun onDestroyView() {

@@ -52,7 +52,29 @@ internal class HistoryAdapter(
 
     fun videoSnapshot(): List<VideoCard> = videos.toList()
 
+    fun stableKeysSnapshot(): List<String> = items.map { it.stableKey() }
+
     fun videoPosition(card: VideoCard): Int? = videoIndex(card)
+
+    fun updateExistingEntriesPreservingOrder(list: List<HistoryEntry>): Boolean {
+        if (items.isEmpty() || list.isEmpty()) return false
+        val updatesByKey = LinkedHashMap<String, HistoryEntry>(list.size)
+        list.forEach { updatesByKey[it.stableKey()] = it }
+
+        val changedPositions = ArrayList<Int>()
+        for (i in items.indices) {
+            val current = items[i]
+            val updated = updatesByKey[current.stableKey()] ?: continue
+            if (current == updated) continue
+            items[i] = updated
+            changedPositions += i
+        }
+        if (changedPositions.isEmpty()) return false
+
+        syncChildren()
+        changedPositions.forEach(::notifyItemChanged)
+        return true
+    }
 
     fun removeByStableKey(stableKey: String): Int {
         val index = items.indexOfFirst { it.stableKey() == stableKey }
