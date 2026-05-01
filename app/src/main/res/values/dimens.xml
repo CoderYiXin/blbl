@@ -43,7 +43,7 @@
     <dimen name="video_card_action_button_height">56dp</dimen>
     <dimen name="video_card_action_group_margin_h">8dp</dimen>
     <dimen name="video_card_action_gap">7dp</dimen>
-    <dimen name="video_card_action_icon_watch_later_size">34dp</dimen>
+    <dimen name="video_card_action_icon_watch_later_size">42dp</dimen>
     <dimen name="video_card_action_icon_detail_size">31dp</dimen>
     <dimen name="video_card_action_icon_up_size">29dp</dimen>
     <dimen name="video_card_action_icon_dismiss_size">30dp</dimen>
