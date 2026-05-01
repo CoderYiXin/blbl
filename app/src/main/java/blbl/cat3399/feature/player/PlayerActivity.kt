@@ -3706,7 +3706,8 @@ class PlayerActivity : BaseActivity() {
         internal const val EDGE_TAP_THRESHOLD = 0.4f
         private const val TAP_SEEK_ACTIVE_MS = 1_200L
         internal const val SMART_SEEK_WINDOW_MS = 900L
-        internal const val HOLD_SCRUB_TICK_MS = 120L
+        internal const val HOLD_SCRUB_TICK_MS = 40L
+        internal const val HOLD_SCRUB_FIXED_STEP_BASE_TICK_MS = 120L
         private const val BACK_DOUBLE_PRESS_WINDOW_MS = 2_500L
         internal const val TOUCH_LOCK_UI_HIDE_DELAY_MS = 2_500L
         internal const val TOUCH_GESTURE_EXCLUDED_EDGE_RATIO = 0.03f

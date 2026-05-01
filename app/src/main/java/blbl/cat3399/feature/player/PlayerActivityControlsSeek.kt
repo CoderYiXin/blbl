@@ -562,9 +562,14 @@ internal fun PlayerActivity.startHoldScrubSeek(engine: BlblPlayerEngine, directi
 
     val tickMs = PlayerActivity.HOLD_SCRUB_TICK_MS
     val stepMs =
-        fixedStepMs?.coerceAtLeast(1L)
-            ?: holdScrubStepMs(durationMs = duration, tickMs = tickMs).coerceAtLeast(1L)
-    val deltaMs = stepMs * direction.toLong()
+        fixedStepMs
+            ?.let {
+                (it.coerceAtLeast(1L).toDouble() * tickMs.toDouble() / PlayerActivity.HOLD_SCRUB_FIXED_STEP_BASE_TICK_MS)
+                    .roundToInt()
+                    .toLong()
+            }
+            ?: holdScrubStepMs(durationMs = duration, tickMs = tickMs)
+    val deltaMs = stepMs.coerceAtLeast(1L) * direction.toLong()
     holdSeekJob =
         lifecycleScope.launch {
             while (isActive) {
