@@ -365,14 +365,8 @@ class TagDetailActivity : BaseActivity() {
         upFetchJob =
             lifecycleScope.launch {
                 try {
-                    val json = if (requestBvid.isNotBlank()) BiliApi.view(requestBvid) else BiliApi.view(safeAid ?: 0L)
-                    val code = json.optInt("code", 0)
-                    if (code != 0) {
-                        val msg = json.optString("message", json.optString("msg", ""))
-                        throw BiliApiException(apiCode = code, apiMessage = msg)
-                    }
-                    val owner = json.optJSONObject("data")?.optJSONObject("owner")
-                    val viewMid = owner?.optLong("mid") ?: 0L
+                    val detail = if (requestBvid.isNotBlank()) BiliApi.videoDetail(requestBvid) else BiliApi.videoDetail(safeAid ?: 0L)
+                    val viewMid = detail.owner?.mid ?: 0L
                     if (viewMid <= 0L) {
                         AppToast.show(this@TagDetailActivity, "未获取到 UP 主信息")
                         return@launch
