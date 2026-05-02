@@ -376,6 +376,10 @@ internal fun PlayerActivity.isSeekKey(keyCode: Int): Boolean {
         KeyEvent.KEYCODE_DPAD_RIGHT,
         KeyEvent.KEYCODE_MEDIA_REWIND,
         KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+        KeyEvent.KEYCODE_BUTTON_L1,
+        KeyEvent.KEYCODE_BUTTON_L2,
+        KeyEvent.KEYCODE_BUTTON_R1,
+        KeyEvent.KEYCODE_BUTTON_R2,
         -> true
 
         else -> false
@@ -725,6 +729,13 @@ internal fun PlayerActivity.isInteractionKey(keyCode: Int): Boolean {
         KeyEvent.KEYCODE_NUMPAD_ENTER,
         KeyEvent.KEYCODE_SPACE,
         KeyEvent.KEYCODE_BACK,
+        KeyEvent.KEYCODE_ESCAPE,
+        KeyEvent.KEYCODE_BUTTON_A,
+        KeyEvent.KEYCODE_BUTTON_B,
+        KeyEvent.KEYCODE_BUTTON_L1,
+        KeyEvent.KEYCODE_BUTTON_L2,
+        KeyEvent.KEYCODE_BUTTON_R1,
+        KeyEvent.KEYCODE_BUTTON_R2,
         KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE,
         KeyEvent.KEYCODE_MEDIA_PLAY,
         KeyEvent.KEYCODE_MEDIA_PAUSE,

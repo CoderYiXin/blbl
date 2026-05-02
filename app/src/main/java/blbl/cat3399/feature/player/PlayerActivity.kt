@@ -1559,7 +1559,11 @@ class PlayerActivity : BaseActivity() {
             val focused = currentFocus
             val focusInPanel = focused != null && FocusTreeUtils.isDescendantOf(focused, binding.recommendPanel)
 
-            if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (
+                keyCode == KeyEvent.KEYCODE_BACK ||
+                keyCode == KeyEvent.KEYCODE_ESCAPE ||
+                keyCode == KeyEvent.KEYCODE_BUTTON_B
+            ) {
                 // Close the recommend panel first; never exit the player while it's visible.
                 if (event.action == KeyEvent.ACTION_DOWN) {
                     finishOnBackKeyUp = false
@@ -1578,6 +1582,7 @@ class PlayerActivity : BaseActivity() {
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER,
                 KeyEvent.KEYCODE_NUMPAD_ENTER,
+                KeyEvent.KEYCODE_BUTTON_A,
                 -> {
                     if (event.action == KeyEvent.ACTION_DOWN && isInteractionKey(keyCode)) noteUserInteraction()
                     if (!focusInPanel) {
@@ -1590,7 +1595,11 @@ class PlayerActivity : BaseActivity() {
         }
 
         if (event.action == KeyEvent.ACTION_UP) {
-            if (keyCode == KeyEvent.KEYCODE_BACK) {
+            if (
+                keyCode == KeyEvent.KEYCODE_BACK ||
+                keyCode == KeyEvent.KEYCODE_ESCAPE ||
+                keyCode == KeyEvent.KEYCODE_BUTTON_B
+            ) {
                 if (finishOnBackKeyUp) {
                     finishOnBackKeyUp = false
                     exitTraceStart("back:up")
@@ -1675,7 +1684,10 @@ class PlayerActivity : BaseActivity() {
                 return true
             }
 
-            KeyEvent.KEYCODE_BACK -> {
+            KeyEvent.KEYCODE_BACK,
+            KeyEvent.KEYCODE_ESCAPE,
+            KeyEvent.KEYCODE_BUTTON_B,
+            -> {
                 val rolledBackAutoResume = tryRollbackAutoResumeOnBack()
                 val cancelledAutoResume = !rolledBackAutoResume && autoResumeHintVisible
                 val cancelledAutoSkip = autoSkipHintVisible || autoSkipPending != null
@@ -1747,6 +1759,7 @@ class PlayerActivity : BaseActivity() {
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER,
+            KeyEvent.KEYCODE_BUTTON_A,
             -> {
                 if (!isSidePanelVisible() && binding.seekProgress.isFocused) {
                     if (event.repeatCount == 0) {
@@ -1795,6 +1808,8 @@ class PlayerActivity : BaseActivity() {
 
             KeyEvent.KEYCODE_DPAD_LEFT,
             KeyEvent.KEYCODE_MEDIA_REWIND,
+            KeyEvent.KEYCODE_BUTTON_L1,
+            KeyEvent.KEYCODE_BUTTON_L2,
             -> {
                 if (keyCode == KeyEvent.KEYCODE_DPAD_LEFT && isSidePanelVisible()) {
                     val panelRoot =
@@ -1832,6 +1847,8 @@ class PlayerActivity : BaseActivity() {
 
             KeyEvent.KEYCODE_DPAD_RIGHT,
             KeyEvent.KEYCODE_MEDIA_FAST_FORWARD,
+            KeyEvent.KEYCODE_BUTTON_R1,
+            KeyEvent.KEYCODE_BUTTON_R2,
             -> {
                 if (isSidePanelVisible()) return super.dispatchKeyEvent(event)
                 if (hasControlsFocusOutsideSeekBar()) return super.dispatchKeyEvent(event)
