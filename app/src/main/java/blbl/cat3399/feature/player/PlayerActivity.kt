@@ -55,6 +55,7 @@ import blbl.cat3399.core.api.BiliApiException
 import blbl.cat3399.core.api.video.AudioTrack
 import blbl.cat3399.core.api.video.VideoAudioKind
 import blbl.cat3399.core.api.video.VideoDetail
+import blbl.cat3399.core.api.video.VideoMediaRequestProfile
 import blbl.cat3399.core.api.video.VideoPlayKind
 import blbl.cat3399.core.api.video.VideoPlayRequest
 import blbl.cat3399.core.api.video.VideoPlayStream
@@ -1193,16 +1194,19 @@ class PlayerActivity : BaseActivity() {
                     qn = qn,
                     fnval = fnval,
                     tryLook = tryLook,
+                    preferCodec = session.preferCodec,
                 )
             } else {
-                if (safeBvid.isBlank()) error("bvid required")
+                if (safeBvid.isBlank() && safeAid == null) error("bvid or aid required")
                 VideoPlayRequest(
                     kind = VideoPlayKind.UGC,
-                    bvid = safeBvid,
+                    bvid = safeBvid.takeIf { it.isNotBlank() },
+                    aid = safeAid,
                     cid = cid,
                     qn = qn,
                     fnval = fnval,
                     tryLook = tryLook,
+                    preferCodec = session.preferCodec,
                 )
             }
         return BiliApi.playUrl(request)
@@ -2658,12 +2662,22 @@ class PlayerActivity : BaseActivity() {
             VideoAudioKind.FLAC -> DashAudioKind.FLAC
         }
 
-    private fun firstProgressiveUrlCandidates(stream: VideoPlayStream): List<String> {
+    private data class ProgressivePlayableCandidate(
+        val urlCandidates: List<String>,
+        val mediaRequestProfile: VideoMediaRequestProfile,
+    )
+
+    private fun firstProgressiveCandidate(stream: VideoPlayStream): ProgressivePlayableCandidate? {
         for (progressive in stream.progressive) {
             val candidates = selectCdnUrls(progressive.urls, preference = BiliClient.prefs.playerCdnPreference)
-            if (candidates.isNotEmpty()) return candidates
+            if (candidates.isNotEmpty()) {
+                return ProgressivePlayableCandidate(
+                    urlCandidates = candidates,
+                    mediaRequestProfile = progressive.mediaRequestProfile,
+                )
+            }
         }
-        return emptyList()
+        return null
     }
 
     private suspend fun pickPlayable(stream: VideoPlayStream, constraints: PlaybackConstraints): Playable {
@@ -2732,6 +2746,7 @@ class PlayerActivity : BaseActivity() {
                     Playable.VideoOnly(
                         videoUrl = videoUrl,
                         videoUrlCandidates = videoUrlCandidates,
+                        videoMediaRequestProfile = picked.mediaRequestProfile,
                         qn = pickedQnFinal,
                         codecid = pickedCodecid,
                         isDolbyVision = pickedIsDolbyVision,
@@ -2795,6 +2810,8 @@ class PlayerActivity : BaseActivity() {
                         audioUrl = audioUrl,
                         videoUrlCandidates = videoUrlCandidates,
                         audioUrlCandidates = audioUrlCandidates,
+                        videoMediaRequestProfile = picked.mediaRequestProfile,
+                        audioMediaRequestProfile = audioPicked.track.mediaRequestProfile,
                         videoTrackInfo = videoTrackInfo,
                         audioTrackInfo = audioTrackInfo,
                         qn = pickedQnFinal,
@@ -2808,9 +2825,16 @@ class PlayerActivity : BaseActivity() {
         }
 
         // Fallback: try durl (progressive) if dash missing.
-        val urlCandidates = firstProgressiveUrlCandidates(stream)
+        val progressiveCandidate = firstProgressiveCandidate(stream)
+        val urlCandidates = progressiveCandidate?.urlCandidates.orEmpty()
         val url = urlCandidates.firstOrNull().orEmpty()
-        if (url.isNotBlank()) return Playable.Progressive(url = url, urlCandidates = urlCandidates)
+        if (url.isNotBlank()) {
+            return Playable.Progressive(
+                url = url,
+                urlCandidates = urlCandidates,
+                mediaRequestProfile = progressiveCandidate?.mediaRequestProfile ?: VideoMediaRequestProfile.WEB,
+            )
+        }
 
         val cid = currentCid.takeIf { it > 0 }
             ?: intent.getLongExtra(EXTRA_CID, -1L).takeIf { it > 0 }
@@ -2828,9 +2852,16 @@ class PlayerActivity : BaseActivity() {
                 tryLook = false,
             )
         fallbackStream.vVoucher?.let { recordVVoucher(it) }
-        val fallbackUrlCandidates = firstProgressiveUrlCandidates(fallbackStream)
+        val fallbackProgressiveCandidate = firstProgressiveCandidate(fallbackStream)
+        val fallbackUrlCandidates = fallbackProgressiveCandidate?.urlCandidates.orEmpty()
         val fallbackUrl = fallbackUrlCandidates.firstOrNull().orEmpty()
-        if (fallbackUrl.isNotBlank()) return Playable.Progressive(url = fallbackUrl, urlCandidates = fallbackUrlCandidates)
+        if (fallbackUrl.isNotBlank()) {
+            return Playable.Progressive(
+                url = fallbackUrl,
+                urlCandidates = fallbackUrlCandidates,
+                mediaRequestProfile = fallbackProgressiveCandidate?.mediaRequestProfile ?: VideoMediaRequestProfile.WEB,
+            )
+        }
 
         // If server returns DASH video without any audio tracks, allow video-only playback as a last resort.
         // (We still prefer progressive durl when available because it usually contains audio.)

@@ -31,12 +31,13 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MediaSource
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.upstream.ParsingLoadable
+import blbl.cat3399.core.api.video.VideoMediaRequestProfile
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.feature.player.AudioBalanceLevel
 import blbl.cat3399.feature.player.CdnFailoverDataSourceFactory
 import blbl.cat3399.feature.player.CdnFailoverState
 import blbl.cat3399.feature.player.DebugStreamKind
 import blbl.cat3399.feature.player.Playable
-import blbl.cat3399.feature.player.AudioBalanceLevel
 import okhttp3.OkHttpClient
 import java.io.ByteArrayInputStream
 import java.io.InputStream
@@ -223,7 +224,11 @@ internal class ExoPlayerEngine(
         volumeBalanceProcessor.setLevel(level)
     }
 
-    private fun createCdnFactory(kind: DebugStreamKind, urlCandidates: List<String>? = null): DataSource.Factory {
+    private fun createCdnFactory(
+        kind: DebugStreamKind,
+        urlCandidates: List<String>? = null,
+        mediaRequestProfile: VideoMediaRequestProfile = VideoMediaRequestProfile.WEB,
+    ): DataSource.Factory {
         val listener =
             object : TransferListener {
                 override fun onTransferInitializing(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
@@ -242,7 +247,12 @@ internal class ExoPlayerEngine(
                 override fun onTransferEnd(source: DataSource, dataSpec: DataSpec, isNetwork: Boolean) {}
             }
 
-        val upstream = OkHttpDataSource.Factory(okHttpClient).setTransferListener(listener)
+        val client =
+            when (mediaRequestProfile) {
+                VideoMediaRequestProfile.WEB -> okHttpClient
+                VideoMediaRequestProfile.APP -> BiliClient.appCdnOkHttp
+            }
+        val upstream = OkHttpDataSource.Factory(client).setTransferListener(listener)
         val uris =
             urlCandidates
                 .orEmpty()
@@ -288,18 +298,38 @@ internal class ExoPlayerEngine(
     private fun setVodPlayable(playable: Playable, subtitle: MediaItem.SubtitleConfiguration?) {
         when (playable) {
             is Playable.Dash -> {
-                val videoFactory = createCdnFactory(DebugStreamKind.VIDEO, urlCandidates = playable.videoUrlCandidates)
-                val audioFactory = createCdnFactory(DebugStreamKind.AUDIO, urlCandidates = playable.audioUrlCandidates)
+                val videoFactory =
+                    createCdnFactory(
+                        DebugStreamKind.VIDEO,
+                        urlCandidates = playable.videoUrlCandidates,
+                        mediaRequestProfile = playable.videoMediaRequestProfile,
+                    )
+                val audioFactory =
+                    createCdnFactory(
+                        DebugStreamKind.AUDIO,
+                        urlCandidates = playable.audioUrlCandidates,
+                        mediaRequestProfile = playable.audioMediaRequestProfile,
+                    )
                 exoPlayer.setMediaSource(buildMerged(videoFactory, audioFactory, playable.videoUrl, playable.audioUrl, subtitle))
             }
 
             is Playable.VideoOnly -> {
-                val mainFactory = createCdnFactory(DebugStreamKind.MAIN, urlCandidates = playable.videoUrlCandidates)
+                val mainFactory =
+                    createCdnFactory(
+                        DebugStreamKind.MAIN,
+                        urlCandidates = playable.videoUrlCandidates,
+                        mediaRequestProfile = playable.videoMediaRequestProfile,
+                    )
                 exoPlayer.setMediaSource(buildProgressive(mainFactory, playable.videoUrl, subtitle))
             }
 
             is Playable.Progressive -> {
-                val mainFactory = createCdnFactory(DebugStreamKind.MAIN, urlCandidates = playable.urlCandidates)
+                val mainFactory =
+                    createCdnFactory(
+                        DebugStreamKind.MAIN,
+                        urlCandidates = playable.urlCandidates,
+                        mediaRequestProfile = playable.mediaRequestProfile,
+                    )
                 exoPlayer.setMediaSource(buildProgressive(mainFactory, playable.url, subtitle))
             }
         }

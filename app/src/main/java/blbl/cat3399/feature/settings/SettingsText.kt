@@ -154,6 +154,12 @@ object SettingsText {
             else -> "默认"
         }
 
+    fun apiSourceText(prefValue: String): String =
+        when (prefValue) {
+            blbl.cat3399.core.prefs.AppPrefs.API_SOURCE_APP -> "App"
+            else -> "Web"
+        }
+
     fun uiScaleFactorText(factor: Float): String {
         val v = factor.takeIf { it.isFinite() } ?: 1.0f
         return String.format(Locale.US, "%.2fx", v)

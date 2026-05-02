@@ -7,6 +7,7 @@ import blbl.cat3399.core.api.BiliApiSourceProvider
 import blbl.cat3399.core.model.VideoCard
 import blbl.cat3399.core.model.VideoTag
 import blbl.cat3399.core.net.BiliClient
+import blbl.cat3399.core.api.video.app.AppVideoApi
 import blbl.cat3399.core.api.video.web.WebVideoApi
 
 data class VideoRecommendRequest(
@@ -85,6 +86,7 @@ data class VideoPlayRequest(
     val qn: Int = 80,
     val fnval: Int = 16,
     val tryLook: Boolean = false,
+    val preferCodec: String? = null,
 )
 
 data class VideoPlayerInfoRequest(
@@ -279,7 +281,7 @@ internal class VideoApiSources(
 internal object VideoApiGateway {
     private val sources =
         VideoApiSources(
-            providers = listOf(WebVideoApi()),
+            providers = listOf(WebVideoApi(), AppVideoApi()),
             preferredSource = {
                 runCatching { BiliApiSource.fromPrefValue(BiliClient.prefs.apiSource) }.getOrDefault(BiliApiSource.WEB)
             },

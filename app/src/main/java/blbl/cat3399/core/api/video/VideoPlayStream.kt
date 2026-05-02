@@ -59,12 +59,18 @@ data class VideoDashStream(
     val audios: List<AudioTrack>,
 )
 
+enum class VideoMediaRequestProfile {
+    WEB,
+    APP,
+}
+
 data class VideoTrack(
     val qn: Int,
     val codecid: Int,
     val urls: List<String>,
     val info: VideoTrackInfo,
     val isDolbyVision: Boolean,
+    val mediaRequestProfile: VideoMediaRequestProfile = VideoMediaRequestProfile.WEB,
 )
 
 data class AudioTrack(
@@ -72,6 +78,7 @@ data class AudioTrack(
     val kind: VideoAudioKind,
     val urls: List<String>,
     val info: VideoTrackInfo,
+    val mediaRequestProfile: VideoMediaRequestProfile = VideoMediaRequestProfile.WEB,
 )
 
 enum class VideoAudioKind {
@@ -83,6 +90,7 @@ enum class VideoAudioKind {
 data class VideoProgressiveStream(
     val urls: List<String>,
     val lengthMs: Long?,
+    val mediaRequestProfile: VideoMediaRequestProfile = VideoMediaRequestProfile.WEB,
 )
 
 data class VideoTrackInfo(

@@ -693,6 +693,30 @@ class SettingsInteractionHandler(
                 }
             }
 
+            SettingId.ApiSource -> {
+                val options =
+                    listOf(
+                        blbl.cat3399.core.prefs.AppPrefs.API_SOURCE_WEB to "Web",
+                        blbl.cat3399.core.prefs.AppPrefs.API_SOURCE_APP to "App",
+                    )
+                showChoiceDialog(
+                    title = "接口类别",
+                    items = options.map { it.second },
+                    current = SettingsText.apiSourceText(prefs.apiSource),
+                ) { selected ->
+                    val key = options.firstOrNull { it.second == selected }?.first
+                        ?: blbl.cat3399.core.prefs.AppPrefs.API_SOURCE_WEB
+                    if (prefs.apiSource == key) {
+                        AppToast.show(activity, "接口类别：$selected")
+                        return@showChoiceDialog
+                    }
+                    prefs.apiSource = key
+                    evictNetworkConnections()
+                    AppToast.show(activity, "接口类别：$selected")
+                    renderer.refreshSection(entry.id)
+                }
+            }
+
             SettingId.UserAgent -> showUserAgentDialog(state.currentSectionIndex, entry.id)
             SettingId.Ipv4OnlyEnabled -> {
                 prefs.ipv4OnlyEnabled = !prefs.ipv4OnlyEnabled
@@ -1562,6 +1586,7 @@ class SettingsInteractionHandler(
     private fun evictNetworkConnections() {
         runCatching { BiliClient.apiOkHttp.connectionPool.evictAll() }
         runCatching { BiliClient.cdnOkHttp.connectionPool.evictAll() }
+        runCatching { BiliClient.appCdnOkHttp.connectionPool.evictAll() }
         runCatching { ApkUpdater.evictConnections() }
     }
 
