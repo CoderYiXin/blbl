@@ -16,9 +16,11 @@ import blbl.cat3399.core.tv.RemoteKeys
 import blbl.cat3399.core.ui.AppToast
 import blbl.cat3399.core.ui.BaseActivity
 import blbl.cat3399.core.ui.DpadGridController
+import blbl.cat3399.core.ui.GridViewportFillMonitor
 import blbl.cat3399.core.ui.GridSpanPolicy
 import blbl.cat3399.core.ui.Immersive
 import blbl.cat3399.core.ui.cloneInUserScale
+import blbl.cat3399.core.ui.installGridViewportFillMonitor
 import blbl.cat3399.core.ui.requestFocusFirstItemOrSelfAfterRefresh
 import blbl.cat3399.databinding.ActivityRegionDetailBinding
 import blbl.cat3399.feature.following.UpDetailActivity
@@ -43,6 +45,7 @@ class RegionDetailActivity : BaseActivity() {
     private var pendingFocusFirstItem: Boolean = false
 
     private var dpadGridController: DpadGridController? = null
+    private var viewportFillMonitor: GridViewportFillMonitor? = null
     private var upFetchJob: Job? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -141,6 +144,13 @@ class RegionDetailActivity : BaseActivity() {
                         enableCenterLongPressToLongClick = true,
                     ),
             ).also { it.install() }
+        viewportFillMonitor?.release()
+        viewportFillMonitor =
+            binding.recycler.installGridViewportFillMonitor(
+                isEnabled = { !isFinishing && !isDestroyed },
+                canLoadMore = { !isLoadingMore && !endReached },
+                loadMore = { loadNextPage() },
+            )
 
         binding.swipeRefresh.setOnRefreshListener {
             pendingFocusFirstItem = true
@@ -160,6 +170,7 @@ class RegionDetailActivity : BaseActivity() {
         super.onResume()
         Immersive.apply(this, BiliClient.prefs.fullscreenEnabled)
         (binding.recycler.layoutManager as? GridLayoutManager)?.spanCount = spanCountForWidth()
+        viewportFillMonitor?.scheduleCheck()
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
@@ -177,6 +188,8 @@ class RegionDetailActivity : BaseActivity() {
     override fun onDestroy() {
         dpadGridController?.release()
         dpadGridController = null
+        viewportFillMonitor?.release()
+        viewportFillMonitor = null
         super.onDestroy()
     }
 
@@ -232,6 +245,7 @@ class RegionDetailActivity : BaseActivity() {
             } finally {
                 if (token == requestToken) binding.swipeRefresh.isRefreshing = false
                 isLoadingMore = false
+                viewportFillMonitor?.scheduleCheck()
             }
         }
     }
