@@ -23,6 +23,21 @@ class AppPrefs(context: Context) {
         get() = prefs.getString(KEY_WEB_REFRESH_TOKEN, null)?.trim()?.takeIf { it.isNotBlank() }
         set(value) = prefs.edit().putString(KEY_WEB_REFRESH_TOKEN, value?.trim()).apply()
 
+    var appAuthSession: BiliAppAuthSession?
+        get() {
+            val raw = prefs.getString(KEY_APP_AUTH_SESSION, null)?.trim()?.takeIf { it.isNotBlank() } ?: return null
+            return runCatching { BiliAppAuthSession.fromJson(JSONObject(raw)) }.getOrNull()
+        }
+        set(value) {
+            val editor = prefs.edit()
+            if (value == null) {
+                editor.remove(KEY_APP_AUTH_SESSION)
+            } else {
+                editor.putString(KEY_APP_AUTH_SESSION, value.toJson().toString())
+            }
+            editor.apply()
+        }
+
     var webCookieRefreshCheckedEpochDay: Long
         get() = prefs.getLong(KEY_WEB_COOKIE_REFRESH_CHECKED_EPOCH_DAY, -1L)
         set(value) = prefs.edit().putLong(KEY_WEB_COOKIE_REFRESH_CHECKED_EPOCH_DAY, value).apply()
@@ -976,6 +991,7 @@ class AppPrefs(context: Context) {
 
         private const val KEY_DISCLAIMER_ACCEPTED = "disclaimer_accepted"
         private const val KEY_WEB_REFRESH_TOKEN = "web_refresh_token"
+        private const val KEY_APP_AUTH_SESSION = "app_auth_session"
         private const val KEY_WEB_COOKIE_REFRESH_CHECKED_EPOCH_DAY = "web_cookie_refresh_checked_epoch_day"
         private const val KEY_BILI_TICKET_CHECKED_EPOCH_DAY = "bili_ticket_checked_epoch_day"
 
@@ -1072,6 +1088,7 @@ class AppPrefs(context: Context) {
         private val CREDENTIAL_KEYS: Set<String> =
             setOf(
                 KEY_WEB_REFRESH_TOKEN,
+                KEY_APP_AUTH_SESSION,
                 KEY_WEB_COOKIE_REFRESH_CHECKED_EPOCH_DAY,
                 KEY_BILI_TICKET_CHECKED_EPOCH_DAY,
                 KEY_GAIA_VGATE_V_VOUCHER,

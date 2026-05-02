@@ -107,6 +107,7 @@ object BiliClient {
     fun clearLoginSession() {
         cookies.clearAll()
         prefs.webRefreshToken = null
+        prefs.appAuthSession = null
         prefs.webCookieRefreshCheckedEpochDay = -1L
         prefs.biliTicketCheckedEpochDay = -1L
         prefs.gaiaVgateVVoucher = null

@@ -7,6 +7,7 @@ import androidx.lifecycle.lifecycleScope
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.net.AppSigner
+import blbl.cat3399.core.prefs.BiliAppAuthSession
 import blbl.cat3399.core.net.WebCookieMaintainer
 import blbl.cat3399.core.ui.BaseActivity
 import blbl.cat3399.core.ui.Immersive
@@ -29,6 +30,9 @@ import kotlin.math.min
 class QrLoginActivity : BaseActivity() {
     private lateinit var binding: ActivityQrLoginBinding
     private var pollJob: Job? = null
+    private val tvLoginLocalId = "0"
+    private val tvLoginPlatform = "android"
+    private val tvLoginMobiApp = "android_hd"
     private val tvLoginUserAgent =
         "Mozilla/5.0 BiliDroid/2.0.1 (bbcallen@gmail.com) os/android model/android_hd mobi_app/android_hd " +
             "build/2001100 channel/master innerVer/2001100 osVer/15 network/2"
@@ -104,9 +108,9 @@ class QrLoginActivity : BaseActivity() {
                 val genParams =
                     AppSigner.signQuery(
                         mapOf(
-                            "local_id" to "0",
-                            "platform" to "android",
-                            "mobi_app" to "android_hd",
+                            "local_id" to tvLoginLocalId,
+                            "platform" to tvLoginPlatform,
+                            "mobi_app" to tvLoginMobiApp,
                         ),
                     )
                 val genUrl =
@@ -158,7 +162,7 @@ class QrLoginActivity : BaseActivity() {
                         AppSigner.signQuery(
                             mapOf(
                                 "auth_code" to key,
-                                "local_id" to "0",
+                                "local_id" to tvLoginLocalId,
                             ),
                         )
                     val pollUrl = BiliClient.withQuery(pollBase, pollParams)
@@ -185,6 +189,20 @@ class QrLoginActivity : BaseActivity() {
                             val accessToken = tokenInfo.optString("access_token", "").trim()
                             val refreshToken = tokenInfo.optString("refresh_token", "").trim()
                             AppLog.i("QrLogin", "tv login ok access=${accessToken.take(6)} refresh=${refreshToken.take(6)}")
+                            BiliAppAuthSession
+                                .fromTvLoginData(
+                                    data = data,
+                                    appKey = AppSigner.APP_KEY_ANDROID_HD,
+                                    mobiApp = tvLoginMobiApp,
+                                    platform = tvLoginPlatform,
+                                    localId = tvLoginLocalId,
+                                )?.let { session ->
+                                    BiliClient.prefs.appAuthSession = session
+                                    AppLog.i(
+                                        "QrLogin",
+                                        "app auth saved mid=${session.mid ?: 0L} expiresAt=${session.expiresAtMs ?: 0L}",
+                                    )
+                                } ?: AppLog.w("QrLogin", "tv login response missing app access token")
                             // PiliPlus-style login does not rely on web cookie refresh_token.
                             BiliClient.prefs.webRefreshToken = null
 
