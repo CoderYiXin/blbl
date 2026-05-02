@@ -1748,6 +1748,12 @@ class PlayerActivity : BaseActivity() {
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER,
             -> {
+                if (!isSidePanelVisible() && binding.seekProgress.isFocused) {
+                    if (event.repeatCount == 0) {
+                        togglePlayPauseFromUser()
+                    }
+                    return true
+                }
                 if (!isSidePanelVisible() && !hasControlsFocus()) {
                     if (osdMode == OsdMode.Hidden) {
                         binding.btnPlayPause.performClick()
