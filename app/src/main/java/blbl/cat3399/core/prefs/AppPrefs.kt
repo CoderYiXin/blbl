@@ -548,6 +548,24 @@ class AppPrefs(context: Context) {
             }
         }
 
+    var sponsorBlockPrivateUserId: String
+        get() {
+            val cached =
+                prefs.getString(KEY_SPONSOR_BLOCK_PRIVATE_USER_ID, null)
+                    ?.trim()
+                    ?.takeIf { isValidSponsorBlockPrivateUserId(it) }
+            if (cached != null) return cached
+            val generated = generateSponsorBlockPrivateUserId()
+            prefs.edit().putString(KEY_SPONSOR_BLOCK_PRIVATE_USER_ID, generated).apply()
+            return generated
+        }
+        set(value) {
+            val normalized = value.trim()
+            if (isValidSponsorBlockPrivateUserId(normalized)) {
+                prefs.edit().putString(KEY_SPONSOR_BLOCK_PRIVATE_USER_ID, normalized).apply()
+            }
+        }
+
     var playerOpenDetailBeforePlay: Boolean
         get() = prefs.getBoolean(KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY, false)
         set(value) = prefs.edit().putBoolean(KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY, value).apply()
@@ -644,6 +662,7 @@ class AppPrefs(context: Context) {
                 PLAYER_DOWN_KEY_OSD_FOCUS_COIN,
                 PLAYER_DOWN_KEY_OSD_FOCUS_FAV,
                 PLAYER_DOWN_KEY_OSD_FOCUS_LIST_PANEL,
+                PLAYER_DOWN_KEY_OSD_FOCUS_SPONSOR_SUBMIT,
                 PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED,
                 -> normalized
 
@@ -665,6 +684,7 @@ class AppPrefs(context: Context) {
                     PLAYER_DOWN_KEY_OSD_FOCUS_COIN,
                     PLAYER_DOWN_KEY_OSD_FOCUS_FAV,
                     PLAYER_DOWN_KEY_OSD_FOCUS_LIST_PANEL,
+                    PLAYER_DOWN_KEY_OSD_FOCUS_SPONSOR_SUBMIT,
                     PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED,
                     -> value
 
@@ -1056,6 +1076,7 @@ class AppPrefs(context: Context) {
         private const val KEY_PLAYER_AUTO_RESUME_ENABLED = "player_auto_resume_enabled"
         private const val KEY_PLAYER_AUTO_SKIP_SEGMENTS_ENABLED = "player_auto_skip_segments_enabled"
         private const val KEY_PLAYER_AUTO_SKIP_SERVER_BASE_URL = "player_auto_skip_server_base_url"
+        private const val KEY_SPONSOR_BLOCK_PRIVATE_USER_ID = "sponsor_block_private_user_id"
         private const val KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY = "player_open_detail_before_play"
         private const val KEY_FULLSCREEN = "fullscreen_enabled"
         private const val KEY_TAB_SWITCH_FOLLOWS_FOCUS = "tab_switch_follows_focus"
@@ -1093,6 +1114,7 @@ class AppPrefs(context: Context) {
                 KEY_BILI_TICKET_CHECKED_EPOCH_DAY,
                 KEY_GAIA_VGATE_V_VOUCHER,
                 KEY_GAIA_VGATE_V_VOUCHER_SAVED_AT_MS,
+                KEY_SPONSOR_BLOCK_PRIVATE_USER_ID,
             )
 
         private val DIAGNOSTIC_EXCLUDED_KEYS: Set<String> =
@@ -1230,6 +1252,7 @@ class AppPrefs(context: Context) {
         const val PLAYER_OSD_BTN_COIN = "coin"
         const val PLAYER_OSD_BTN_FAV = "fav"
         const val PLAYER_OSD_BTN_LIST_PANEL = "list_panel"
+        const val PLAYER_OSD_BTN_SPONSOR_SUBMIT = "sponsor_submit"
         const val PLAYER_OSD_BTN_ADVANCED = "advanced"
 
         val DEFAULT_PLAYER_OSD_BUTTONS: List<String> =
@@ -1240,6 +1263,7 @@ class AppPrefs(context: Context) {
                 PLAYER_OSD_BTN_DANMAKU,
                 PLAYER_OSD_BTN_COMMENTS,
                 PLAYER_OSD_BTN_DETAIL,
+                PLAYER_OSD_BTN_SPONSOR_SUBMIT,
                 PLAYER_OSD_BTN_UP,
                 PLAYER_OSD_BTN_LIST_PANEL,
                 PLAYER_OSD_BTN_ADVANCED,
@@ -1259,6 +1283,7 @@ class AppPrefs(context: Context) {
                 PLAYER_OSD_BTN_COIN,
                 PLAYER_OSD_BTN_FAV,
                 PLAYER_OSD_BTN_LIST_PANEL,
+                PLAYER_OSD_BTN_SPONSOR_SUBMIT,
                 PLAYER_OSD_BTN_ADVANCED,
             )
 
@@ -1274,6 +1299,7 @@ class AppPrefs(context: Context) {
         const val PLAYER_DOWN_KEY_OSD_FOCUS_COIN = "coin"
         const val PLAYER_DOWN_KEY_OSD_FOCUS_FAV = "fav"
         const val PLAYER_DOWN_KEY_OSD_FOCUS_LIST_PANEL = "list_panel"
+        const val PLAYER_DOWN_KEY_OSD_FOCUS_SPONSOR_SUBMIT = "sponsor_submit"
         const val PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED = "advanced"
 
         private const val PLAYER_DOWN_KEY_OSD_FOCUS_RECOMMEND_LEGACY = "recommend"
@@ -1285,6 +1311,21 @@ class AppPrefs(context: Context) {
             val md5 = java.security.MessageDigest.getInstance("MD5").digest(bytes)
             val hex = buildString(md5.size * 2) { md5.forEach { append(String.format(java.util.Locale.US, "%02x", it)) } }
             return "XY${hex[2]}${hex[12]}${hex[22]}$hex"
+        }
+
+        private fun isValidSponsorBlockPrivateUserId(text: String): Boolean {
+            val value = text.trim()
+            return value.length >= 30 && value.none { it.isWhitespace() }
+        }
+
+        private fun generateSponsorBlockPrivateUserId(): String {
+            val alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+            val random = java.security.SecureRandom()
+            return buildString(40) {
+                repeat(40) {
+                    append(alphabet[random.nextInt(alphabet.length)])
+                }
+            }
         }
 
         private fun isValidUuid(text: String): Boolean {

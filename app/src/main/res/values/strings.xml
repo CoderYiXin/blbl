@@ -100,6 +100,10 @@
     <string name="player_list_empty">暂无内容</string>
     <string name="player_btn_comments">评论</string>
     <string name="player_btn_detail">视频详情页</string>
+    <string name="player_btn_sponsor_submit">上传广告片段</string>
+    <string name="player_sponsor_submit_upload">上传</string>
+    <string name="player_sponsor_submit_delete">删除</string>
+    <string name="player_sponsor_submit_close">关闭</string>
     <string name="player_info_intro">简介</string>
     <string name="player_info_recommend_empty">暂无推荐</string>
     <string name="player_info_desc_empty">暂无简介</string>

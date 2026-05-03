@@ -154,6 +154,9 @@ class PlayerActivity : BaseActivity() {
     internal var holdSeekJob: kotlinx.coroutines.Job? = null
     internal var seekHintJob: kotlinx.coroutines.Job? = null
     internal var keyScrubEndJob: kotlinx.coroutines.Job? = null
+    internal val sponsorSubmitPanelState = SponsorSubmitPanelState()
+    internal var sponsorSubmitThumbJob: Job? = null
+    internal var sponsorSubmitUploadJob: Job? = null
     internal var keyScrubPendingSeekToMs: Long? = null
     internal var scrubbing: Boolean = false
     internal var lastInteractionAtMs: Long = 0L
@@ -1124,6 +1127,7 @@ class PlayerActivity : BaseActivity() {
         initSidePanels()
         initCommentImageViewer()
         initBottomCardPanel()
+        initSponsorSubmitPanel()
 
         initControls(engine)
         applyOsdButtonsVisibility()
@@ -1449,6 +1453,8 @@ class PlayerActivity : BaseActivity() {
                 return super.dispatchKeyEvent(event)
             }
         }
+
+        if (dispatchSponsorSubmitPanelKey(event)) return true
 
         if (isBottomCardPanelVisible()) {
             val focused = currentFocus
@@ -1895,6 +1901,8 @@ class PlayerActivity : BaseActivity() {
         holdSeekJob?.cancel()
         seekHintJob?.cancel()
         keyScrubEndJob?.cancel()
+        sponsorSubmitThumbJob?.cancel()
+        sponsorSubmitUploadJob?.cancel()
         releaseTouchGestures()
         videoShotFetchJob?.cancel()
         videoShotFetchJob = null
@@ -2045,6 +2053,10 @@ class PlayerActivity : BaseActivity() {
         binding.btnListPanel.setOnClickListener {
             showListPanelFromButton()
             setControlsVisible(true)
+        }
+
+        binding.btnSponsorSubmit.setOnClickListener {
+            openSponsorSubmitPanel()
         }
 
         binding.btnDanmaku.setOnClickListener {

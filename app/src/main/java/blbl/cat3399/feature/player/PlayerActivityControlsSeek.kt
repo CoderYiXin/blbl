@@ -50,7 +50,7 @@ internal fun PlayerActivity.toggleControls() {
 }
 
 internal fun PlayerActivity.setControlsVisible(visible: Boolean) {
-    val show = (visible || isSidePanelVisible()) && !isTouchLocked()
+    val show = (visible || isSidePanelVisible() || isSponsorSubmitPanelVisible()) && !isTouchLocked()
     seekOsdHideJob?.cancel()
     seekOsdHideJob = null
     seekOsdToken = 0L
@@ -96,7 +96,7 @@ internal fun PlayerActivity.updateTopBarUi() {
 }
 
 internal fun PlayerActivity.showSeekOsd() {
-    if (isSidePanelVisible()) return
+    if (isSidePanelVisible() || isSponsorSubmitPanelVisible()) return
     if (osdMode == PlayerActivity.OsdMode.Full) {
         // Full OSD already has the progress bar; keep it alive.
         noteUserInteraction()
@@ -118,7 +118,7 @@ internal fun PlayerActivity.showSeekOsd() {
 }
 
 internal fun PlayerActivity.showSeekOsd(posMs: Long, durationMs: Long, bufferedPosMs: Long) {
-    if (isSidePanelVisible()) return
+    if (isSidePanelVisible() || isSponsorSubmitPanelVisible()) return
     val duration = durationMs.coerceAtLeast(0L)
     val pos = posMs.coerceAtLeast(0L)
     val bufPos = bufferedPosMs.coerceAtLeast(0L)
@@ -214,7 +214,7 @@ internal fun PlayerActivity.scheduleHideSeekOsd() {
 
 internal fun PlayerActivity.updatePersistentBottomProgressBarVisibility() {
     val enabled = session.persistentBottomProgressEnabled
-    val showControls = osdMode != PlayerActivity.OsdMode.Hidden || isSidePanelVisible()
+    val showControls = osdMode != PlayerActivity.OsdMode.Hidden || isSidePanelVisible() || isSponsorSubmitPanelVisible()
     val persistentV = if (enabled && !showControls && !transientSeekOsdVisible) View.VISIBLE else View.GONE
     if (binding.progressPersistentBottom.visibility != persistentV) binding.progressPersistentBottom.visibility = persistentV
 
@@ -228,6 +228,7 @@ internal fun PlayerActivity.restartAutoHideTimer() {
     if (isTouchLocked()) return
     if (osdMode != PlayerActivity.OsdMode.Full) return
     if (isSidePanelVisible()) return
+    if (isSponsorSubmitPanelVisible()) return
     if (scrubbing) return
     if (!exo.isPlaying) return
     val token = lastInteractionAtMs
@@ -289,6 +290,7 @@ internal fun PlayerActivity.hasControlsFocus(): Boolean =
     binding.topBar.hasFocus() ||
         binding.cardUpQuick.hasFocus() ||
         binding.bottomBar.hasFocus() ||
+        binding.sponsorSubmitPanel.hasFocus() ||
         binding.playerInfoPanel.hasFocus() ||
         binding.settingsPanel.hasFocus() ||
         binding.commentsPanel.hasFocus()
@@ -326,6 +328,7 @@ internal fun PlayerActivity.focusDownKeyOsdTargetControl() {
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_COIN -> binding.btnCoin
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_FAV -> binding.btnFav
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_LIST_PANEL -> binding.btnListPanel
+            AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_SPONSOR_SUBMIT -> binding.btnSponsorSubmit
             AppPrefs.PLAYER_DOWN_KEY_OSD_FOCUS_ADVANCED -> binding.btnAdvanced
             else -> binding.btnPlayPause
         }
