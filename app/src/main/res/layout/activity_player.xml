@@ -854,7 +854,7 @@
         android:id="@+id/sponsor_submit_scrim"
         android:layout_width="0dp"
         android:layout_height="0dp"
-        android:background="@android:color/transparent"
+        android:background="#99000000"
         android:clickable="true"
         android:focusable="false"
         android:importantForAccessibility="no"
@@ -877,7 +877,7 @@
         android:layout_height="wrap_content"
         android:layout_marginStart="24dp"
         android:layout_marginEnd="24dp"
-        android:layout_marginBottom="22dp"
+        android:layout_marginBottom="4dp"
         android:clickable="true"
         android:focusable="false"
         android:focusableInTouchMode="false"
@@ -896,7 +896,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:paddingStart="10dp"
-            android:paddingTop="8dp"
+            android:paddingTop="3dp"
             android:paddingEnd="10dp"
             android:paddingBottom="8dp">
 
@@ -912,14 +912,16 @@
                 android:id="@+id/tv_sponsor_submit_status"
                 android:layout_width="0dp"
                 android:layout_height="wrap_content"
-                android:layout_marginTop="2dp"
+                android:layout_marginStart="16dp"
                 android:ellipsize="end"
+                android:gravity="end"
                 android:maxLines="1"
                 android:textColor="?attr/colorOnSurface"
                 android:textSize="16sp"
+                app:layout_constraintBottom_toBottomOf="@id/sponsor_submit_button_row"
                 app:layout_constraintEnd_toEndOf="parent"
-                app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/sponsor_submit_thumbnails" />
+                app:layout_constraintStart_toEndOf="@id/sponsor_submit_button_row"
+                app:layout_constraintTop_toTopOf="@id/sponsor_submit_button_row" />
 
             <blbl.cat3399.feature.player.SponsorSubmitTimelineView
                 android:id="@+id/sponsor_submit_timeline"
@@ -929,7 +931,7 @@
                 android:focusableInTouchMode="false"
                 app:layout_constraintEnd_toEndOf="parent"
                 app:layout_constraintStart_toStartOf="parent"
-                app:layout_constraintTop_toBottomOf="@id/tv_sponsor_submit_status" />
+                app:layout_constraintTop_toBottomOf="@id/sponsor_submit_thumbnails" />
 
             <LinearLayout
                 android:id="@+id/sponsor_submit_button_row"
@@ -952,7 +954,7 @@
                     android:stateListAnimator="@animator/blbl_focus_scale"
                     android:text="@string/player_sponsor_submit_upload"
                     android:textAllCaps="false"
-                    android:textSize="16sp"
+                    android:textSize="17sp"
                     app:cornerRadius="12dp"
                     app:strokeColor="?attr/blblFocusStrokeColor"
                     app:strokeWidth="2dp" />
@@ -967,7 +969,7 @@
                     android:stateListAnimator="@animator/blbl_focus_scale"
                     android:text="@string/player_sponsor_submit_delete"
                     android:textAllCaps="false"
-                    android:textSize="16sp"
+                    android:textSize="17sp"
                     app:cornerRadius="12dp"
                     app:strokeColor="?attr/blblFocusStrokeColor"
                     app:strokeWidth="2dp" />
@@ -982,7 +984,7 @@
                     android:stateListAnimator="@animator/blbl_focus_scale"
                     android:text="@string/player_sponsor_submit_close"
                     android:textAllCaps="false"
-                    android:textSize="16sp"
+                    android:textSize="17sp"
                     app:cornerRadius="12dp"
                     app:strokeColor="?attr/blblFocusStrokeColor"
                     app:strokeWidth="2dp" />

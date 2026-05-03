@@ -90,28 +90,42 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
 
         val gap = dp(10f)
         val horizontalPadding = dp(6f)
-        val availableWidth = (width - horizontalPadding * 2 - gap * (count - 1)).coerceAtLeast(1f)
-        val itemWidth = availableWidth / count.toFloat()
+        val verticalPadding = dp(5f)
+        val selectedScale = 1.07f
+        val contentHeight = (height - verticalPadding * 2f).coerceAtLeast(1f)
         val aspect = aspectWidth.toFloat() / aspectHeight.coerceAtLeast(1).toFloat()
-        val itemHeight = (itemWidth / aspect.coerceAtLeast(0.0001f)).coerceAtMost(height * 0.90f)
-        val top = ((height - itemHeight) / 2f).coerceAtLeast(0f)
+        val itemHeight = contentHeight / selectedScale
+        val itemWidth = itemHeight * aspect.coerceAtLeast(0.0001f)
+        val top = verticalPadding + ((contentHeight - itemHeight) / 2f).coerceAtLeast(0f)
+        val rowWidth = itemWidth * count + gap * (count - 1)
+        val selected = selectedIndex.takeIf { it in thumbnails.indices } ?: -1
+        val centeredRowLeft =
+            if (selected >= 0) {
+                width / 2f - (selected * (itemWidth + gap) + itemWidth / 2f)
+            } else {
+                (width - rowWidth) / 2f
+            }
+        val rowLeft =
+            if (rowWidth <= width - horizontalPadding * 2) {
+                (width - rowWidth) / 2f
+            } else {
+                centeredRowLeft.coerceIn(width - horizontalPadding - rowWidth, horizontalPadding)
+            }
 
         for (i in thumbnails.indices) {
             if (i == selectedIndex) continue
-            val left = horizontalPadding + i * (itemWidth + gap)
+            val left = rowLeft + i * (itemWidth + gap)
             dstRect.set(left, top, left + itemWidth, top + itemHeight)
             drawThumb(canvas, thumbnails[i], dstRect, selected = false)
         }
 
-        val selected = selectedIndex
         if (selected in thumbnails.indices) {
-            val scale = 1.10f
-            val baseLeft = horizontalPadding + selected * (itemWidth + gap)
+            val baseLeft = rowLeft + selected * (itemWidth + gap)
             val centerX = baseLeft + itemWidth / 2f
-            val selectedWidth = (itemWidth * scale).coerceAtMost(width.toFloat())
-            val selectedHeight = (itemHeight * scale).coerceAtMost(height.toFloat())
+            val selectedWidth = (itemWidth * selectedScale).coerceAtMost(width.toFloat())
+            val selectedHeight = (itemHeight * selectedScale).coerceAtMost(contentHeight)
             val left = (centerX - selectedWidth / 2f).coerceIn(0f, (width - selectedWidth).coerceAtLeast(0f))
-            val selectedTop = ((height - selectedHeight) / 2f).coerceAtLeast(0f)
+            val selectedTop = verticalPadding + ((contentHeight - selectedHeight) / 2f).coerceAtLeast(0f)
             dstRect.set(left, selectedTop, left + selectedWidth, selectedTop + selectedHeight)
             drawThumb(canvas, thumbnails[selected], dstRect, selected = true)
         }
@@ -274,7 +288,7 @@ class SponsorSubmitTimelineView @JvmOverloads constructor(
         if (right <= left) return
 
         val centerY = height * 0.52f
-        val trackHeight = dp(7f)
+        val trackHeight = dp(8f)
         tmpRect.set(left, centerY - trackHeight / 2f, right, centerY + trackHeight / 2f)
         canvas.drawRoundRect(tmpRect, trackHeight / 2f, trackHeight / 2f, trackPaint)
 
@@ -299,8 +313,8 @@ class SponsorSubmitTimelineView @JvmOverloads constructor(
     private fun drawCursor(canvas: Canvas, left: Float, right: Float, centerY: Float) {
         val x = xForTime(cursorMs, left, right)
         val active = isFocused
-        val h = dp(if (active) 39f else 31f)
-        val halfWidth = dp(if (active) 1.9f else 1.25f)
+        val h = dp(if (active) 36f else 29f)
+        val halfWidth = dp(if (active) 2.1f else 1.45f)
         cursorPaint.color = if (active) playerFocusStrokeColor() else 0x99FFFFFF.toInt()
         tmpRect.set(x - halfWidth, centerY - h / 2f, x + halfWidth, centerY + h / 2f)
         canvas.drawRoundRect(tmpRect, halfWidth, halfWidth, cursorPaint)
@@ -310,15 +324,16 @@ class SponsorSubmitTimelineView @JvmOverloads constructor(
         for (marker in markers) {
             val highlighted = marker.id == selectedMarkerId || marker.id == movingMarkerId
             val x = xForTime(marker.timeMs, left, right)
-            val size = dp(11f)
+            val markerHeight = dp(13f)
+            val halfWidth = markerHeight / sqrt(3f)
             val top = centerY - dp(21f)
             buildRoundedTrianglePath(
                 path = markerPath,
                 tipX = x,
                 tipY = top,
-                halfWidth = size,
-                height = size,
-                cornerRadius = size * 0.28f,
+                halfWidth = halfWidth,
+                height = markerHeight,
+                cornerRadius = markerHeight * 0.28f,
             )
             val paint = if (marker.kind == SponsorSubmitMarkerKind.START) startPaint else endPaint
             canvas.drawPath(markerPath, paint)
@@ -326,7 +341,7 @@ class SponsorSubmitTimelineView @JvmOverloads constructor(
             if (highlighted) canvas.drawPath(markerPath, selectedStrokePaint)
             val label = if (marker.kind == SponsorSubmitMarkerKind.START) "始" else "终"
             val textWidth = textPaint.measureText(label)
-            canvas.drawText(label, x - textWidth / 2f, top + size + dp(16f), textPaint)
+            canvas.drawText(label, x - textWidth / 2f, top + markerHeight + dp(16f), textPaint)
         }
     }
 

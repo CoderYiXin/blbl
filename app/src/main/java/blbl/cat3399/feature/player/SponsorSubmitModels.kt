@@ -1,6 +1,7 @@
 package blbl.cat3399.feature.player
 
 internal const val SPONSOR_SUBMIT_MIN_SEGMENT_MS: Long = 500L
+internal const val SPONSOR_SUBMIT_MAX_SEGMENTS: Int = 10
 
 internal enum class SponsorSubmitInteractionMode {
     MARK,
@@ -41,8 +42,10 @@ internal sealed interface SponsorSubmitMarkResult {
 }
 
 internal class SponsorSubmitDraftState(
-    private val maxSegments: Int = 1,
+    maxSegments: Int = SPONSOR_SUBMIT_MAX_SEGMENTS,
 ) {
+    val maxSegments: Int = maxSegments.coerceAtLeast(1)
+
     private val markers = ArrayList<SponsorSubmitMarker>()
     private var nextMarkerId = 1L
     private var nextPairId = 1L
@@ -172,7 +175,7 @@ internal class SponsorSubmitDraftState(
 }
 
 internal data class SponsorSubmitPanelState(
-    val draft: SponsorSubmitDraftState = SponsorSubmitDraftState(maxSegments = 1),
+    val draft: SponsorSubmitDraftState = SponsorSubmitDraftState(),
 ) {
     var mode: SponsorSubmitInteractionMode = SponsorSubmitInteractionMode.MARK
     var cursorMs: Long = 0L

@@ -73,7 +73,7 @@ internal fun PlayerActivity.openSponsorSubmitPanel() {
     sponsorSubmitPanelState.reset(positionMs = position, wasPlaying = wasPlaying)
 
     engine.pause()
-    setControlsVisible(true)
+    setControlsVisible(false)
     autoHideJob?.cancel()
     binding.videoShotPreview.visibility = View.GONE
     binding.sponsorSubmitScrim.visibility = View.VISIBLE
@@ -241,7 +241,7 @@ private fun PlayerActivity.handleSponsorSubmitCenter() {
                 }
 
                 SponsorSubmitMarkResult.NoCapacity -> {
-                    AppToast.show(this, "调试阶段暂时只支持一段")
+                    AppToast.show(this, "最多支持${state.draft.maxSegments}段")
                     updateSponsorSubmitPanelUi(loadThumbnails = false)
                 }
             }
@@ -412,9 +412,10 @@ private fun PlayerActivity.updateSponsorSubmitPanelUi(loadThumbnails: Boolean) {
 
 private fun PlayerActivity.buildSponsorSubmitStatusText(durationMs: Long): String {
     val state = sponsorSubmitPanelState
+    val completeCount = state.draft.completeSegments().size
     val modeText =
         when (state.mode) {
-            SponsorSubmitInteractionMode.MARK -> if (state.draft.completeSegments().isEmpty()) "标记中" else "已成段"
+            SponsorSubmitInteractionMode.MARK -> if (completeCount == 0) "标记中" else "${completeCount}段"
             SponsorSubmitInteractionMode.DELETE -> "删除标记"
             SponsorSubmitInteractionMode.MOVE -> {
                 val marker = state.draft.markerById(state.movingMarkerId)
@@ -634,7 +635,7 @@ private fun PlayerActivity.submitSponsorSubmitSegments(category: SponsorSubmitCa
                 }
 
                 if (submitResult.state == SponsorBlockApi.SubmitState.SUCCESS) {
-                    AppToast.show(this@submitSponsorSubmitSegments, "已上传片段")
+                    AppToast.show(this@submitSponsorSubmitSegments, "已上传${apiSegments.size}段片段")
                 } else {
                     AppToast.showLong(this@submitSponsorSubmitSegments, submitResult.detail ?: "上传失败")
                 }
