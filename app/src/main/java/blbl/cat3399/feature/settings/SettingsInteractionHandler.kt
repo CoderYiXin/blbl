@@ -755,6 +755,13 @@ class SettingsInteractionHandler(
                 renderer.refreshSection(entry.id)
             }
 
+            SettingId.AvoidDisplayCutout -> {
+                prefs.avoidDisplayCutout = !prefs.avoidDisplayCutout
+                activity.reapplyWindowDisplayPolicy()
+                AppToast.show(activity, "避开挖孔/圆角区域：${if (prefs.avoidDisplayCutout) "开" else "关"}")
+                renderer.refreshSection(entry.id)
+            }
+
             SettingId.TabSwitchFollowsFocus -> {
                 prefs.tabSwitchFollowsFocus = !prefs.tabSwitchFollowsFocus
                 AppToast.show(activity, "tab跟随焦点切换：${if (prefs.tabSwitchFollowsFocus) "开" else "关"}")

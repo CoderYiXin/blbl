@@ -574,6 +574,10 @@ class AppPrefs(context: Context) {
         get() = prefs.getBoolean(KEY_FULLSCREEN, true)
         set(value) = prefs.edit().putBoolean(KEY_FULLSCREEN, value).apply()
 
+    var avoidDisplayCutout: Boolean
+        get() = prefs.getBoolean(KEY_AVOID_DISPLAY_CUTOUT, true)
+        set(value) = prefs.edit().putBoolean(KEY_AVOID_DISPLAY_CUTOUT, value).apply()
+
     var tabSwitchFollowsFocus: Boolean
         get() = prefs.getBoolean(KEY_TAB_SWITCH_FOLLOWS_FOCUS, true)
         set(value) = prefs.edit().putBoolean(KEY_TAB_SWITCH_FOLLOWS_FOCUS, value).apply()
@@ -1079,6 +1083,7 @@ class AppPrefs(context: Context) {
         private const val KEY_SPONSOR_BLOCK_PRIVATE_USER_ID = "sponsor_block_private_user_id"
         private const val KEY_PLAYER_OPEN_DETAIL_BEFORE_PLAY = "player_open_detail_before_play"
         private const val KEY_FULLSCREEN = "fullscreen_enabled"
+        private const val KEY_AVOID_DISPLAY_CUTOUT = "avoid_display_cutout"
         private const val KEY_TAB_SWITCH_FOLLOWS_FOCUS = "tab_switch_follows_focus"
         private const val KEY_MAIN_AUTO_HIDE_SIDEBAR_ON_ENTER_CONTENT = "main_auto_hide_sidebar_on_enter_content"
         private const val KEY_MAIN_BACK_FOCUS_SCHEME = "main_back_focus_scheme"
