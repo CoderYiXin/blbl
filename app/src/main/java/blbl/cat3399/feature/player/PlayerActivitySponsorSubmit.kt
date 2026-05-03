@@ -43,6 +43,16 @@ internal fun PlayerActivity.initSponsorSubmitPanel() {
     binding.btnSponsorSubmitClose.setOnClickListener { hideSponsorSubmitPanel(restorePlayback = true) }
     binding.btnSponsorSubmitDelete.setOnClickListener { enterSponsorSubmitDeleteMode() }
     binding.btnSponsorSubmitUpload.setOnClickListener { showSponsorSubmitCategoryPicker() }
+    binding.sponsorSubmitTimeline.setTouchCallbacks(
+        onCursorChanged = { timeMs, finished -> handleSponsorSubmitTimelineTouch(timeMs, finished) },
+        onMarkerDragStarted = { marker -> handleSponsorSubmitMarkerTouchStart(marker) },
+        onMarkerDragged = { marker, timeMs, finished -> handleSponsorSubmitMarkerTouchDrag(marker, timeMs, finished) },
+        onMarkerClicked = { marker -> handleSponsorSubmitMarkerTouchClick(marker) },
+    )
+    binding.sponsorSubmitThumbnails.setTouchCallbacks(
+        onThumbnailScrubbed = { timeMs, finished -> handleSponsorSubmitThumbnailTouch(timeMs, finished) },
+        onThumbnailClicked = { timeMs -> handleSponsorSubmitThumbnailClick(timeMs) },
+    )
     updateSponsorSubmitPanelUi(loadThumbnails = false)
 }
 
@@ -229,23 +239,139 @@ private fun PlayerActivity.handleSponsorSubmitCenter() {
                 return
             }
 
-            when (val result = state.draft.placeMarker(state.cursorMs, resolveSponsorSubmitDurationMs())) {
-                is SponsorSubmitMarkResult.Placed -> {
-                    state.selectedMarkerId = result.marker.id
-                    updateSponsorSubmitPanelUi(loadThumbnails = false)
-                }
-
-                SponsorSubmitMarkResult.EndBeforeStart -> {
-                    AppToast.show(this, "结束点需要晚于开始点")
-                    updateSponsorSubmitPanelUi(loadThumbnails = false)
-                }
-
-                SponsorSubmitMarkResult.NoCapacity -> {
-                    AppToast.show(this, "最多支持${state.draft.maxSegments}段")
-                    updateSponsorSubmitPanelUi(loadThumbnails = false)
-                }
-            }
+            placeSponsorSubmitMarkerAtCursor(loadThumbnails = false)
         }
+    }
+}
+
+private fun PlayerActivity.placeSponsorSubmitMarkerAtCursor(loadThumbnails: Boolean) {
+    val state = sponsorSubmitPanelState
+    when (val result = state.draft.placeMarker(state.cursorMs, resolveSponsorSubmitDurationMs())) {
+        is SponsorSubmitMarkResult.Placed -> {
+            state.selectedMarkerId = result.marker.id
+            updateSponsorSubmitPanelUi(loadThumbnails = loadThumbnails)
+        }
+
+        SponsorSubmitMarkResult.EndBeforeStart -> {
+            AppToast.show(this, "结束点需要晚于开始点")
+            updateSponsorSubmitPanelUi(loadThumbnails = false)
+        }
+
+        SponsorSubmitMarkResult.NoCapacity -> {
+            AppToast.show(this, "最多支持${state.draft.maxSegments}段")
+            updateSponsorSubmitPanelUi(loadThumbnails = false)
+        }
+    }
+}
+
+private fun PlayerActivity.handleSponsorSubmitTimelineTouch(timeMs: Long, finished: Boolean) {
+    val state = sponsorSubmitPanelState
+    if (state.submitting) return
+    val duration = resolveSponsorSubmitDurationMs()
+    if (duration <= 0L) return
+
+    if (state.mode == SponsorSubmitInteractionMode.MOVE) {
+        state.mode = SponsorSubmitInteractionMode.MARK
+        state.selectedMarkerId = null
+        state.movingMarkerId = null
+    }
+    state.cursorMs = timeMs.coerceIn(0L, duration)
+    if (state.mode == SponsorSubmitInteractionMode.DELETE) {
+        state.selectedMarkerId =
+            state.draft.nearestMarkerAt(state.cursorMs, sponsorSubmitMarkerToleranceMs())?.id
+                ?: state.selectedMarkerId
+    }
+    focusSponsorSubmitTimeline()
+    updateSponsorSubmitPanelUi(loadThumbnails = finished)
+}
+
+private fun PlayerActivity.handleSponsorSubmitThumbnailTouch(timeMs: Long, finished: Boolean) {
+    val state = sponsorSubmitPanelState
+    if (state.submitting) return
+    val duration = resolveSponsorSubmitDurationMs()
+    if (duration <= 0L) return
+
+    if (state.mode == SponsorSubmitInteractionMode.MOVE) {
+        state.mode = SponsorSubmitInteractionMode.MARK
+        state.selectedMarkerId = null
+        state.movingMarkerId = null
+    }
+    state.cursorMs = timeMs.coerceIn(0L, duration)
+    if (state.mode == SponsorSubmitInteractionMode.DELETE) {
+        state.selectedMarkerId =
+            state.draft.nearestMarkerAt(state.cursorMs, sponsorSubmitMarkerToleranceMs())?.id
+                ?: state.selectedMarkerId
+    }
+    focusSponsorSubmitTimeline()
+    if (finished) noteUserInteraction()
+    updateSponsorSubmitPanelUi(loadThumbnails = true)
+}
+
+private fun PlayerActivity.handleSponsorSubmitThumbnailClick(timeMs: Long) {
+    val state = sponsorSubmitPanelState
+    if (state.submitting) return
+    val duration = resolveSponsorSubmitDurationMs()
+    if (duration <= 0L) return
+
+    state.cursorMs = timeMs.coerceIn(0L, duration)
+    if (state.mode == SponsorSubmitInteractionMode.MARK) {
+        placeSponsorSubmitMarkerAtCursor(loadThumbnails = false)
+    } else {
+        updateSponsorSubmitPanelUi(loadThumbnails = true)
+    }
+}
+
+private fun PlayerActivity.handleSponsorSubmitMarkerTouchStart(marker: SponsorSubmitMarker) {
+    val state = sponsorSubmitPanelState
+    if (state.submitting) return
+
+    state.cursorMs = marker.timeMs
+    state.selectedMarkerId = marker.id
+    state.movingMarkerId = null
+    focusSponsorSubmitTimeline()
+    updateSponsorSubmitPanelUi(loadThumbnails = false)
+}
+
+private fun PlayerActivity.handleSponsorSubmitMarkerTouchDrag(
+    marker: SponsorSubmitMarker,
+    timeMs: Long,
+    finished: Boolean,
+) {
+    val state = sponsorSubmitPanelState
+    if (state.submitting) return
+    val duration = resolveSponsorSubmitDurationMs()
+    if (duration <= 0L) return
+
+    state.selectedMarkerId = marker.id
+    if (state.mode == SponsorSubmitInteractionMode.DELETE) {
+        state.cursorMs = state.draft.markerById(marker.id)?.timeMs ?: marker.timeMs
+        updateSponsorSubmitPanelUi(loadThumbnails = finished)
+        return
+    }
+
+    state.mode = SponsorSubmitInteractionMode.MOVE
+    state.movingMarkerId = marker.id
+    state.draft.moveMarker(marker.id, timeMs, duration)
+    state.cursorMs = state.draft.markerById(marker.id)?.timeMs ?: timeMs.coerceIn(0L, duration)
+    if (finished) {
+        state.mode = SponsorSubmitInteractionMode.MARK
+        state.movingMarkerId = null
+    }
+    updateSponsorSubmitPanelUi(loadThumbnails = finished)
+}
+
+private fun PlayerActivity.handleSponsorSubmitMarkerTouchClick(marker: SponsorSubmitMarker) {
+    val state = sponsorSubmitPanelState
+    if (state.submitting) return
+
+    state.cursorMs = marker.timeMs
+    state.selectedMarkerId = marker.id
+    state.movingMarkerId = null
+    if (state.mode == SponsorSubmitInteractionMode.DELETE) {
+        deleteSelectedSponsorSubmitMarker()
+    } else {
+        state.mode = SponsorSubmitInteractionMode.MARK
+        updateSponsorSubmitPanelUi(loadThumbnails = true)
     }
 }
 

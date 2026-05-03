@@ -10,7 +10,9 @@ import android.graphics.RectF
 import android.os.Build
 import android.util.AttributeSet
 import android.util.TypedValue
+import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import androidx.core.content.ContextCompat
 import blbl.cat3399.R
 import kotlin.math.abs
@@ -52,12 +54,39 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
         }
     private val srcRect = Rect()
     private val dstRect = RectF()
+    private val touchTargetRect = RectF()
     private val clipPath = Path()
+    private val touchSlopPx = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
 
     private var thumbnails: List<SponsorSubmitThumbnail> = emptyList()
     private var selectedIndex: Int = -1
     private var aspectWidth: Int = 16
     private var aspectHeight: Int = 9
+    private var onThumbnailScrubbed: ((timeMs: Long, finished: Boolean) -> Unit)? = null
+    private var onThumbnailClicked: ((timeMs: Long) -> Unit)? = null
+    private var touchDown = false
+    private var touchDragged = false
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var lastTouchIndex = -1
+
+    private data class ThumbnailStripLayout(
+        val itemRects: List<RectF>,
+        val selectedRect: RectF?,
+        val selectedIndex: Int,
+    )
+
+    init {
+        isClickable = true
+    }
+
+    internal fun setTouchCallbacks(
+        onThumbnailScrubbed: ((timeMs: Long, finished: Boolean) -> Unit)?,
+        onThumbnailClicked: ((timeMs: Long) -> Unit)?,
+    ) {
+        this.onThumbnailScrubbed = onThumbnailScrubbed
+        this.onThumbnailClicked = onThumbnailClicked
+    }
 
     fun setContentAspectRatio(width: Int, height: Int) {
         val w = width.coerceAtLeast(1)
@@ -77,16 +106,93 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
     internal fun clearThumbnails() {
         thumbnails = emptyList()
         selectedIndex = -1
+        resetTouchState()
         invalidate()
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val count = thumbnails.size
-        if (count <= 0) {
+        val layout = buildThumbnailLayout()
+        if (layout == null) {
             drawEmpty(canvas)
             return
         }
+
+        for (i in thumbnails.indices) {
+            if (i == layout.selectedIndex) continue
+            drawThumb(canvas, thumbnails[i], layout.itemRects[i], selected = false)
+        }
+
+        if (layout.selectedIndex in thumbnails.indices) {
+            val selectedRect = layout.selectedRect ?: layout.itemRects[layout.selectedIndex]
+            drawThumb(canvas, thumbnails[layout.selectedIndex], selectedRect, selected = true)
+        }
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (thumbnails.isEmpty()) return super.onTouchEvent(event)
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                val index = thumbnailIndexForTouch(event.x, event.y, allowNearest = false) ?: return false
+                parent?.requestDisallowInterceptTouchEvent(true)
+                touchDown = true
+                touchDragged = false
+                touchDownX = event.x
+                touchDownY = event.y
+                lastTouchIndex = index
+                isPressed = true
+                onThumbnailScrubbed?.invoke(thumbnails[index].timeMs, false)
+                return true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (!touchDown) return false
+                if (!touchDragged && movedPastTouchSlop(event.x, event.y)) {
+                    touchDragged = true
+                }
+                val index = thumbnailIndexForTouch(event.x, event.y, allowNearest = true)
+                if (index != null && index != lastTouchIndex) {
+                    lastTouchIndex = index
+                    onThumbnailScrubbed?.invoke(thumbnails[index].timeMs, false)
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_UP -> {
+                if (!touchDown) return false
+                val index = thumbnailIndexForTouch(event.x, event.y, allowNearest = true)
+                val wasDragged = touchDragged
+                resetTouchState()
+                if (index != null) {
+                    onThumbnailScrubbed?.invoke(thumbnails[index].timeMs, true)
+                    if (!wasDragged) {
+                        onThumbnailClicked?.invoke(thumbnails[index].timeMs)
+                        performClick()
+                    }
+                }
+                parent?.requestDisallowInterceptTouchEvent(false)
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                resetTouchState()
+                parent?.requestDisallowInterceptTouchEvent(false)
+                return true
+            }
+        }
+
+        return super.onTouchEvent(event)
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
+    private fun buildThumbnailLayout(): ThumbnailStripLayout? {
+        val count = thumbnails.size
+        if (count <= 0 || width <= 0 || height <= 0) return null
 
         val gap = dp(10f)
         val horizontalPadding = dp(6f)
@@ -112,23 +218,59 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
                 centeredRowLeft.coerceIn(width - horizontalPadding - rowWidth, horizontalPadding)
             }
 
-        for (i in thumbnails.indices) {
-            if (i == selectedIndex) continue
-            val left = rowLeft + i * (itemWidth + gap)
-            dstRect.set(left, top, left + itemWidth, top + itemHeight)
-            drawThumb(canvas, thumbnails[i], dstRect, selected = false)
-        }
+        val itemRects =
+            thumbnails.indices.map { index ->
+                val left = rowLeft + index * (itemWidth + gap)
+                RectF(left, top, left + itemWidth, top + itemHeight)
+            }
+        val selectedRect =
+            if (selected in thumbnails.indices) {
+                val base = itemRects[selected]
+                val centerX = base.centerX()
+                val selectedWidth = (itemWidth * selectedScale).coerceAtMost(width.toFloat())
+                val selectedHeight = (itemHeight * selectedScale).coerceAtMost(contentHeight)
+                val left = (centerX - selectedWidth / 2f).coerceIn(0f, (width - selectedWidth).coerceAtLeast(0f))
+                val selectedTop = verticalPadding + ((contentHeight - selectedHeight) / 2f).coerceAtLeast(0f)
+                RectF(left, selectedTop, left + selectedWidth, selectedTop + selectedHeight)
+            } else {
+                null
+            }
 
-        if (selected in thumbnails.indices) {
-            val baseLeft = rowLeft + selected * (itemWidth + gap)
-            val centerX = baseLeft + itemWidth / 2f
-            val selectedWidth = (itemWidth * selectedScale).coerceAtMost(width.toFloat())
-            val selectedHeight = (itemHeight * selectedScale).coerceAtMost(contentHeight)
-            val left = (centerX - selectedWidth / 2f).coerceIn(0f, (width - selectedWidth).coerceAtLeast(0f))
-            val selectedTop = verticalPadding + ((contentHeight - selectedHeight) / 2f).coerceAtLeast(0f)
-            dstRect.set(left, selectedTop, left + selectedWidth, selectedTop + selectedHeight)
-            drawThumb(canvas, thumbnails[selected], dstRect, selected = true)
+        return ThumbnailStripLayout(itemRects = itemRects, selectedRect = selectedRect, selectedIndex = selected)
+    }
+
+    private fun thumbnailIndexForTouch(x: Float, y: Float, allowNearest: Boolean): Int? {
+        val layout = buildThumbnailLayout() ?: return null
+        val hitSlop = dp(8f)
+        val selectedRect = layout.selectedRect
+        if (layout.selectedIndex in thumbnails.indices && selectedRect != null && containsWithSlop(selectedRect, x, y, hitSlop)) {
+            return layout.selectedIndex
         }
+        for (i in layout.itemRects.indices) {
+            if (i == layout.selectedIndex) continue
+            if (containsWithSlop(layout.itemRects[i], x, y, hitSlop)) return i
+        }
+        if (!allowNearest) return null
+        if (y < -hitSlop || y > height + hitSlop) return null
+        return layout.itemRects.indices.minByOrNull { index ->
+            abs(layout.itemRects[index].centerX() - x)
+        }
+    }
+
+    private fun containsWithSlop(rect: RectF, x: Float, y: Float, slop: Float): Boolean {
+        touchTargetRect.set(rect)
+        touchTargetRect.inset(-slop, -slop)
+        return touchTargetRect.contains(x, y)
+    }
+
+    private fun movedPastTouchSlop(x: Float, y: Float): Boolean =
+        abs(x - touchDownX) > touchSlopPx || abs(y - touchDownY) > touchSlopPx
+
+    private fun resetTouchState() {
+        touchDown = false
+        touchDragged = false
+        lastTouchIndex = -1
+        isPressed = false
     }
 
     private fun drawEmpty(canvas: Canvas) {
@@ -244,17 +386,47 @@ class SponsorSubmitTimelineView @JvmOverloads constructor(
         }
     private val tmpRect = RectF()
     private val markerPath = Path()
+    private val touchSlopPx = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
 
     private var durationMs: Long = 0L
     private var cursorMs: Long = 0L
     private var markers: List<SponsorSubmitMarker> = emptyList()
     private var selectedMarkerId: Long? = null
     private var movingMarkerId: Long? = null
+    private var onCursorChanged: ((timeMs: Long, finished: Boolean) -> Unit)? = null
+    private var onMarkerDragStarted: ((SponsorSubmitMarker) -> Unit)? = null
+    private var onMarkerDragged: ((marker: SponsorSubmitMarker, timeMs: Long, finished: Boolean) -> Unit)? = null
+    private var onMarkerClicked: ((SponsorSubmitMarker) -> Unit)? = null
+    private var touchDown = false
+    private var touchDragged = false
+    private var touchDownX = 0f
+    private var touchDownY = 0f
+    private var activeMarkerId: Long? = null
+
+    private data class TimelineMetrics(
+        val left: Float,
+        val right: Float,
+        val centerY: Float,
+        val trackHeight: Float,
+    )
 
     init {
+        isClickable = true
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             defaultFocusHighlightEnabled = false
         }
+    }
+
+    internal fun setTouchCallbacks(
+        onCursorChanged: ((timeMs: Long, finished: Boolean) -> Unit)?,
+        onMarkerDragStarted: ((SponsorSubmitMarker) -> Unit)?,
+        onMarkerDragged: ((marker: SponsorSubmitMarker, timeMs: Long, finished: Boolean) -> Unit)?,
+        onMarkerClicked: ((SponsorSubmitMarker) -> Unit)?,
+    ) {
+        this.onCursorChanged = onCursorChanged
+        this.onMarkerDragStarted = onMarkerDragStarted
+        this.onMarkerDragged = onMarkerDragged
+        this.onMarkerClicked = onMarkerClicked
     }
 
     internal fun setState(
@@ -283,18 +455,142 @@ class SponsorSubmitTimelineView @JvmOverloads constructor(
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        val metrics = timelineMetrics() ?: return
+        tmpRect.set(
+            metrics.left,
+            metrics.centerY - metrics.trackHeight / 2f,
+            metrics.right,
+            metrics.centerY + metrics.trackHeight / 2f,
+        )
+        canvas.drawRoundRect(tmpRect, metrics.trackHeight / 2f, metrics.trackHeight / 2f, trackPaint)
+
+        drawCompleteRanges(canvas, metrics.left, metrics.right, metrics.centerY, metrics.trackHeight)
+        drawCursor(canvas, metrics.left, metrics.right, metrics.centerY)
+        drawMarkers(canvas, metrics.left, metrics.right, metrics.centerY)
+    }
+
+    override fun onTouchEvent(event: MotionEvent): Boolean {
+        if (durationMs <= 0L) return super.onTouchEvent(event)
+
+        when (event.actionMasked) {
+            MotionEvent.ACTION_DOWN -> {
+                parent?.requestDisallowInterceptTouchEvent(true)
+                requestFocus()
+                touchDown = true
+                touchDragged = false
+                touchDownX = event.x
+                touchDownY = event.y
+                isPressed = true
+
+                val marker = markerForTouch(event.x, event.y)
+                activeMarkerId = marker?.id
+                if (marker != null) {
+                    onMarkerDragStarted?.invoke(marker)
+                } else {
+                    onCursorChanged?.invoke(timeForTouchX(event.x), false)
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_MOVE -> {
+                if (!touchDown) return false
+                if (!touchDragged && movedPastTouchSlop(event.x, event.y)) {
+                    touchDragged = true
+                }
+
+                val marker = activeMarker()
+                if (marker != null) {
+                    if (touchDragged) {
+                        onMarkerDragged?.invoke(marker, timeForTouchX(event.x), false)
+                    }
+                } else {
+                    onCursorChanged?.invoke(timeForTouchX(event.x), false)
+                }
+                return true
+            }
+
+            MotionEvent.ACTION_UP -> {
+                if (!touchDown) return false
+                val marker = activeMarker()
+                val wasDragged = touchDragged
+                val upTime = timeForTouchX(event.x)
+                resetTouchState()
+                if (marker != null) {
+                    if (wasDragged) {
+                        onMarkerDragged?.invoke(marker, upTime, true)
+                    } else {
+                        onMarkerClicked?.invoke(marker)
+                        performClick()
+                    }
+                } else {
+                    onCursorChanged?.invoke(upTime, true)
+                    if (!wasDragged) performClick()
+                }
+                parent?.requestDisallowInterceptTouchEvent(false)
+                return true
+            }
+
+            MotionEvent.ACTION_CANCEL -> {
+                resetTouchState()
+                parent?.requestDisallowInterceptTouchEvent(false)
+                return true
+            }
+        }
+
+        return super.onTouchEvent(event)
+    }
+
+    override fun performClick(): Boolean {
+        super.performClick()
+        return true
+    }
+
+    private fun timelineMetrics(): TimelineMetrics? {
         val left = paddingLeft + dp(18f)
         val right = width - paddingRight - dp(18f)
-        if (right <= left) return
+        if (right <= left) return null
+        return TimelineMetrics(
+            left = left,
+            right = right,
+            centerY = height * 0.52f,
+            trackHeight = dp(8f),
+        )
+    }
 
-        val centerY = height * 0.52f
-        val trackHeight = dp(8f)
-        tmpRect.set(left, centerY - trackHeight / 2f, right, centerY + trackHeight / 2f)
-        canvas.drawRoundRect(tmpRect, trackHeight / 2f, trackHeight / 2f, trackPaint)
+    private fun markerForTouch(x: Float, y: Float): SponsorSubmitMarker? {
+        val metrics = timelineMetrics() ?: return null
+        val hitRadius = dp(22f)
+        val top = metrics.centerY - dp(31f)
+        val bottom = metrics.centerY + dp(28f)
+        if (y < top || y > bottom) return null
+        return markers
+            .map { marker -> marker to abs(xForTime(marker.timeMs, metrics.left, metrics.right) - x) }
+            .filter { (_, distance) -> distance <= hitRadius }
+            .minByOrNull { (_, distance) -> distance }
+            ?.first
+    }
 
-        drawCompleteRanges(canvas, left, right, centerY, trackHeight)
-        drawCursor(canvas, left, right, centerY)
-        drawMarkers(canvas, left, right, centerY)
+    private fun activeMarker(): SponsorSubmitMarker? {
+        val id = activeMarkerId ?: return null
+        return markers.firstOrNull { it.id == id }
+    }
+
+    private fun timeForTouchX(x: Float): Long {
+        val metrics = timelineMetrics() ?: return 0L
+        val duration = durationMs.coerceAtLeast(0L)
+        if (duration <= 0L) return 0L
+        val fraction = ((x - metrics.left) / (metrics.right - metrics.left).coerceAtLeast(1f)).coerceIn(0f, 1f)
+        return (duration.toDouble() * fraction.toDouble()).roundToInt().toLong().coerceIn(0L, duration)
+    }
+
+    private fun movedPastTouchSlop(x: Float, y: Float): Boolean =
+        abs(x - touchDownX) > touchSlopPx || abs(y - touchDownY) > touchSlopPx
+
+    private fun resetTouchState() {
+        touchDown = false
+        touchDragged = false
+        activeMarkerId = null
+        isPressed = false
     }
 
     private fun drawCompleteRanges(canvas: Canvas, left: Float, right: Float, centerY: Float, trackHeight: Float) {
