@@ -23,7 +23,7 @@ object BiliClient {
     private const val BASE = "https://api.bilibili.com"
     private const val HDR_SKIP_ORIGIN = "X-Blbl-Skip-Origin"
     private const val LOG_HTTP_REQUESTS = false
-    private const val APP_CDN_USER_AGENT = "Bilibili Freedoooooom/MarkII"
+    internal const val APP_CDN_USER_AGENT = "Bilibili Freedoooooom/MarkII"
 
     lateinit var prefs: AppPrefs
         private set

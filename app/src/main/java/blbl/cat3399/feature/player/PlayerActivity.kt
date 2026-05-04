@@ -2990,12 +2990,6 @@ class PlayerActivity : BaseActivity() {
                 }
                 when (playable) {
                     is Playable.Dash -> {
-                        if (engine.kind == PlayerEngineKind.IjkPlayer) {
-                            if (playable.videoTrackInfo.segmentBase == null || playable.audioTrackInfo.segmentBase == null) {
-                                AppToast.showLong(this@PlayerActivity, "IjkPlayer 播放 DASH 需要 segment_base（initialization/index_range），当前流缺失，请切回 ExoPlayer")
-                                return@launch
-                            }
-                        }
                         lastPickedDash = playable
                         debug.cdnHost = runCatching { Uri.parse(playable.videoUrl).host }.getOrNull()
                         logPickedPlayable(source = "reload", playable = playable)
