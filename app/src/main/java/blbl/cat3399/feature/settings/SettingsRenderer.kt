@@ -194,7 +194,7 @@ class SettingsRenderer(
                     SettingEntry(SettingId.GaiaVgate, "风控验证", gaiaVgateStatusText(), "播放被拦截后可在此手动完成人机验证"),
                     SettingEntry(SettingId.ClearCache, "清理缓存", cacheSizeText(), null),
                     SettingEntry(SettingId.ConfigTransfer, "导出/入配置", "打开", null),
-                    SettingEntry(SettingId.ClearLogin, "清除登录", if (BiliClient.cookies.hasSessData()) "已登录" else "未登录", null),
+                    SettingEntry(SettingId.ClearLogin, "清除登录", loginStatusText(), null),
                 )
 
             "页面设置" ->
@@ -498,6 +498,15 @@ class SettingsRenderer(
             tokenOk -> "已通过"
             voucherOk -> "待验证"
             else -> "无"
+        }
+    }
+
+    private fun loginStatusText(): String {
+        val count = BiliClient.accounts.accounts().size
+        return when {
+            count > 1 -> "已登录 ${count} 个帐号"
+            BiliClient.cookies.hasSessData() -> "已登录"
+            else -> "未登录"
         }
     }
 

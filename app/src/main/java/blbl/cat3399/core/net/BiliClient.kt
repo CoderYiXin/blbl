@@ -1,6 +1,7 @@
 package blbl.cat3399.core.net
 
 import android.content.Context
+import blbl.cat3399.core.account.AccountSessionStore
 import blbl.cat3399.core.log.AppLog
 import blbl.cat3399.core.prefs.AppPrefs
 import kotlinx.coroutines.Dispatchers
@@ -26,6 +27,8 @@ object BiliClient {
     internal const val APP_CDN_USER_AGENT = "Bilibili Freedoooooom/MarkII"
 
     lateinit var prefs: AppPrefs
+        private set
+    lateinit var accounts: AccountSessionStore
         private set
     lateinit var cookies: CookieStore
         private set
@@ -54,6 +57,7 @@ object BiliClient {
 
     fun init(context: Context) {
         prefs = AppPrefs(context.applicationContext)
+        accounts = AccountSessionStore(context.applicationContext)
         cookies = CookieStore(context.applicationContext)
         val dns = ipv4OnlyDns { prefs.ipv4OnlyEnabled }
         val baseClient = OkHttpClient.Builder()
@@ -140,13 +144,7 @@ object BiliClient {
     }
 
     fun clearLoginSession() {
-        cookies.clearAll()
-        prefs.webRefreshToken = null
-        prefs.appAuthSession = null
-        prefs.webCookieRefreshCheckedEpochDay = -1L
-        prefs.biliTicketCheckedEpochDay = -1L
-        prefs.gaiaVgateVVoucher = null
-        prefs.gaiaVgateVVoucherSavedAtMs = -1L
+        accounts.clearAllAccountsAndCurrentSession(appPrefs = prefs, cookies = cookies)
     }
 
     private fun clientFor(url: String, noCookies: Boolean = false): OkHttpClient {

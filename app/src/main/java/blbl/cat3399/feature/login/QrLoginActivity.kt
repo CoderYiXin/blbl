@@ -64,9 +64,12 @@ class QrLoginActivity : BaseActivity() {
 
         binding.btnRefresh.setOnClickListener { startFlow() }
         binding.btnClear.setOnClickListener {
-            BiliClient.clearLoginSession()
-            binding.tvStatus.text = "已清除 Cookie（SESSDATA 等）"
-            binding.tvDebug.text = "cookie cleared"
+            BiliClient.accounts.clearAllAccountsAndCurrentSession(
+                appPrefs = BiliClient.prefs,
+                cookies = BiliClient.cookies,
+            )
+            binding.tvStatus.text = "已清除登录状态"
+            binding.tvDebug.text = "login cleared"
         }
 
         binding.tvStatus.text = "正在申请二维码..."
@@ -231,6 +234,10 @@ class QrLoginActivity : BaseActivity() {
                                 if (out.isNotEmpty()) BiliClient.cookies.upsertAll(out)
                             }
                             WebCookieMaintainer.ensureBuvidActiveOncePerDay()
+                            BiliClient.accounts.saveCurrentSessionAsActive(
+                                appPrefs = BiliClient.prefs,
+                                cookies = BiliClient.cookies,
+                            )
                             binding.tvStatus.text = "登录成功，Cookie 已写入（返回上一页）"
                             AppLog.i("QrLogin", "login success sess=${BiliClient.cookies.hasSessData()}")
                             binding.tvDebug.text = "login ok sess=${BiliClient.cookies.hasSessData()}"
