@@ -397,12 +397,14 @@ class VideoDetailActivity : BaseActivity() {
                         val pubDate = detail.pubDateSec
                         val viewCount = detail.stat.view
                         val likeCount = detail.stat.like
+                        val coinCount = detail.stat.coin
                         val favCount = detail.stat.favorite
                         metaText =
                             buildList {
                                 pubDate?.let { Format.pubDateText(it) }.takeIf { !it.isNullOrBlank() }?.let(::add)
                                 viewCount?.let { "${Format.count(it)}观看" }?.let(::add)
                                 likeCount?.let { "${Format.count(it)}赞" }?.let(::add)
+                                coinCount?.let { "${Format.count(it)}投币" }?.let(::add)
                                 favCount?.let { "${Format.count(it)}收藏" }?.let(::add)
                             }.joinToString(" · ")
                                 .trim()
