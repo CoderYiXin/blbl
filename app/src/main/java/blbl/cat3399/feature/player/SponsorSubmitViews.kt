@@ -13,33 +13,36 @@ import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewConfiguration
+import android.view.ViewGroup
 import androidx.core.content.ContextCompat
+import androidx.recyclerview.widget.LinearLayoutManager
+import androidx.recyclerview.widget.LinearSnapHelper
+import androidx.recyclerview.widget.RecyclerView
 import blbl.cat3399.R
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.launch
 import kotlin.math.abs
-import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlin.math.roundToLong
 import kotlin.math.sqrt
-
-internal data class SponsorSubmitThumbnail(
-    val timeMs: Long,
-    val frame: SpriteFrame,
-)
 
 class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
     context: Context,
     attrs: AttributeSet? = null,
     defStyleAttr: Int = 0,
-) : View(context, attrs, defStyleAttr) {
-    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+) : RecyclerView(context, attrs, defStyleAttr) {
+    private val thumbnailLayoutManager = LinearLayoutManager(context, HORIZONTAL, false)
+    private val thumbnailAdapter =
+        SponsorSubmitThumbnailAdapter(
+            onClick = { position, timeMs -> clickThumbnail(position, timeMs) },
+        )
+    private val snapHelper = LinearSnapHelper()
     private val placeholderPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.FILL
             color = 0xCC000000.toInt()
-        }
-    private val dimPaint =
-        Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            style = Paint.Style.FILL
-            color = 0x73000000
         }
     private val selectedHaloPaint =
         Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -52,32 +55,72 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
             strokeWidth = dp(4f)
             color = playerFocusStrokeColor()
         }
-    private val srcRect = Rect()
-    private val dstRect = RectF()
-    private val touchTargetRect = RectF()
-    private val clipPath = Path()
-    private val touchSlopPx = ViewConfiguration.get(context).scaledTouchSlop.toFloat()
+    private val overlayRect = RectF()
 
-    private var thumbnails: List<SponsorSubmitThumbnail> = emptyList()
     private var selectedIndex: Int = -1
     private var aspectWidth: Int = 16
     private var aspectHeight: Int = 9
+    private var durationMs: Long = 0L
+    private var itemSlotWidthPx: Int = 1
     private var onThumbnailScrubbed: ((timeMs: Long, finished: Boolean) -> Unit)? = null
     private var onThumbnailClicked: ((timeMs: Long) -> Unit)? = null
-    private var touchDown = false
-    private var touchDragged = false
-    private var touchDownX = 0f
-    private var touchDownY = 0f
-    private var lastTouchIndex = -1
-
-    private data class ThumbnailStripLayout(
-        val itemRects: List<RectF>,
-        val selectedRect: RectF?,
-        val selectedIndex: Int,
-    )
+    private var userScrollActive = false
+    private var suppressScrollCallbacks = false
+    private var lastReportedTimeMs: Long? = null
 
     init {
-        isClickable = true
+        isFocusable = false
+        descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
+        overScrollMode = OVER_SCROLL_NEVER
+        clipToPadding = false
+        itemAnimator = null
+        layoutManager = thumbnailLayoutManager
+        adapter = thumbnailAdapter
+        snapHelper.attachToRecyclerView(this)
+        addItemDecoration(
+            object : ItemDecoration() {
+                override fun onDrawOver(
+                    canvas: Canvas,
+                    parent: RecyclerView,
+                    state: State,
+                ) {
+                    drawFixedSelection(canvas)
+                }
+            },
+        )
+        addOnScrollListener(
+            object : OnScrollListener() {
+                override fun onScrollStateChanged(recyclerView: RecyclerView, newState: Int) {
+                    when (newState) {
+                        SCROLL_STATE_DRAGGING -> {
+                            userScrollActive = true
+                            this@SponsorSubmitThumbnailStripView.parent?.requestDisallowInterceptTouchEvent(true)
+                        }
+
+                        SCROLL_STATE_IDLE -> {
+                            if (userScrollActive) {
+                                reportCenteredThumbnail(finished = true)
+                                userScrollActive = false
+                                this@SponsorSubmitThumbnailStripView.parent?.requestDisallowInterceptTouchEvent(false)
+                            }
+                        }
+                    }
+                }
+
+                override fun onScrolled(recyclerView: RecyclerView, dx: Int, dy: Int) {
+                    if (suppressScrollCallbacks) return
+                    updateCenteredSelection()
+                    if (userScrollActive) reportCenteredThumbnail(finished = false)
+                }
+            },
+        )
+    }
+
+    internal fun setFrameLoader(
+        scope: CoroutineScope,
+        loader: suspend (timeSec: Int) -> SpriteFrame?,
+    ) {
+        thumbnailAdapter.setFrameLoader(scope, loader)
     }
 
     internal fun setTouchCallbacks(
@@ -94,95 +137,50 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
         if (aspectWidth == w && aspectHeight == h) return
         aspectWidth = w
         aspectHeight = h
-        invalidate()
+        thumbnailAdapter.setContentAspectRatio(w, h)
+        updateItemMetrics()
     }
 
-    internal fun setThumbnails(items: List<SponsorSubmitThumbnail>, selectedIndex: Int) {
-        thumbnails = items
-        this.selectedIndex = selectedIndex.takeIf { it in items.indices } ?: -1
-        invalidate()
+    internal fun setThumbnailTimes(
+        timesSec: List<Int>,
+        selectedIndex: Int,
+        durationMs: Long,
+    ) {
+        this.durationMs = durationMs.coerceAtLeast(0L)
+        thumbnailAdapter.submit(timesSec)
+        this.selectedIndex = selectedIndex.takeIf { it in timesSec.indices } ?: -1
+        thumbnailAdapter.setSelectedIndex(this.selectedIndex)
+        updateItemMetrics()
+        if (!userScrollActive) centerSelectedThumbnail()
     }
 
     internal fun clearThumbnails() {
-        thumbnails = emptyList()
+        thumbnailAdapter.submit(emptyList())
         selectedIndex = -1
-        resetTouchState()
-        invalidate()
+        durationMs = 0L
+        userScrollActive = false
+        suppressScrollCallbacks = false
+        lastReportedTimeMs = null
+        invalidateItemDecorations()
+    }
+
+    override fun onSizeChanged(
+        w: Int,
+        h: Int,
+        oldw: Int,
+        oldh: Int,
+    ) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        updateItemMetrics()
+        if (!userScrollActive) post { centerSelectedThumbnail() }
     }
 
     override fun onDraw(canvas: Canvas) {
-        super.onDraw(canvas)
-        val layout = buildThumbnailLayout()
-        if (layout == null) {
+        if (thumbnailAdapter.itemCount == 0) {
             drawEmpty(canvas)
             return
         }
-
-        for (i in thumbnails.indices) {
-            if (i == layout.selectedIndex) continue
-            drawThumb(canvas, thumbnails[i], layout.itemRects[i], selected = false)
-        }
-
-        if (layout.selectedIndex in thumbnails.indices) {
-            val selectedRect = layout.selectedRect ?: layout.itemRects[layout.selectedIndex]
-            drawThumb(canvas, thumbnails[layout.selectedIndex], selectedRect, selected = true)
-        }
-    }
-
-    override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (thumbnails.isEmpty()) return super.onTouchEvent(event)
-
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                val index = thumbnailIndexForTouch(event.x, event.y, allowNearest = false) ?: return false
-                parent?.requestDisallowInterceptTouchEvent(true)
-                touchDown = true
-                touchDragged = false
-                touchDownX = event.x
-                touchDownY = event.y
-                lastTouchIndex = index
-                isPressed = true
-                onThumbnailScrubbed?.invoke(thumbnails[index].timeMs, false)
-                return true
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                if (!touchDown) return false
-                if (!touchDragged && movedPastTouchSlop(event.x, event.y)) {
-                    touchDragged = true
-                }
-                val index = thumbnailIndexForTouch(event.x, event.y, allowNearest = true)
-                if (index != null && index != lastTouchIndex) {
-                    lastTouchIndex = index
-                    onThumbnailScrubbed?.invoke(thumbnails[index].timeMs, false)
-                }
-                return true
-            }
-
-            MotionEvent.ACTION_UP -> {
-                if (!touchDown) return false
-                val index = thumbnailIndexForTouch(event.x, event.y, allowNearest = true)
-                val wasDragged = touchDragged
-                resetTouchState()
-                if (index != null) {
-                    onThumbnailScrubbed?.invoke(thumbnails[index].timeMs, true)
-                    if (!wasDragged) {
-                        onThumbnailClicked?.invoke(thumbnails[index].timeMs)
-                        performClick()
-                    }
-                }
-                parent?.requestDisallowInterceptTouchEvent(false)
-                return true
-            }
-
-            MotionEvent.ACTION_CANCEL -> {
-                resetTouchState()
-                parent?.requestDisallowInterceptTouchEvent(false)
-                return true
-            }
-        }
-
-        return super.onTouchEvent(event)
+        super.onDraw(canvas)
     }
 
     override fun performClick(): Boolean {
@@ -190,87 +188,117 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
         return true
     }
 
-    private fun buildThumbnailLayout(): ThumbnailStripLayout? {
-        val count = thumbnails.size
-        if (count <= 0 || width <= 0 || height <= 0) return null
-
-        val gap = dp(10f)
-        val horizontalPadding = dp(6f)
-        val verticalPadding = dp(5f)
-        val selectedScale = 1.07f
-        val contentHeight = (height - verticalPadding * 2f).coerceAtLeast(1f)
-        val aspect = aspectWidth.toFloat() / aspectHeight.coerceAtLeast(1).toFloat()
-        val itemHeight = contentHeight / selectedScale
-        val itemWidth = itemHeight * aspect.coerceAtLeast(0.0001f)
-        val top = verticalPadding + ((contentHeight - itemHeight) / 2f).coerceAtLeast(0f)
-        val rowWidth = itemWidth * count + gap * (count - 1)
-        val selected = selectedIndex.takeIf { it in thumbnails.indices } ?: -1
-        val centeredRowLeft =
-            if (selected >= 0) {
-                width / 2f - (selected * (itemWidth + gap) + itemWidth / 2f)
-            } else {
-                (width - rowWidth) / 2f
-            }
-        val rowLeft =
-            if (rowWidth <= width - horizontalPadding * 2) {
-                (width - rowWidth) / 2f
-            } else {
-                centeredRowLeft.coerceIn(width - horizontalPadding - rowWidth, horizontalPadding)
-            }
-
-        val itemRects =
-            thumbnails.indices.map { index ->
-                val left = rowLeft + index * (itemWidth + gap)
-                RectF(left, top, left + itemWidth, top + itemHeight)
-            }
-        val selectedRect =
-            if (selected in thumbnails.indices) {
-                val base = itemRects[selected]
-                val centerX = base.centerX()
-                val selectedWidth = (itemWidth * selectedScale).coerceAtMost(width.toFloat())
-                val selectedHeight = (itemHeight * selectedScale).coerceAtMost(contentHeight)
-                val left = (centerX - selectedWidth / 2f).coerceIn(0f, (width - selectedWidth).coerceAtLeast(0f))
-                val selectedTop = verticalPadding + ((contentHeight - selectedHeight) / 2f).coerceAtLeast(0f)
-                RectF(left, selectedTop, left + selectedWidth, selectedTop + selectedHeight)
-            } else {
-                null
-            }
-
-        return ThumbnailStripLayout(itemRects = itemRects, selectedRect = selectedRect, selectedIndex = selected)
+    private fun clickThumbnail(position: Int, timeMs: Long) {
+        if (position !in 0 until thumbnailAdapter.itemCount) return
+        selectedIndex = position
+        thumbnailAdapter.setSelectedIndex(position)
+        centerSelectedThumbnail()
+        onThumbnailScrubbed?.invoke(timeMs, true)
+        onThumbnailClicked?.invoke(timeMs)
+        performClick()
     }
 
-    private fun thumbnailIndexForTouch(x: Float, y: Float, allowNearest: Boolean): Int? {
-        val layout = buildThumbnailLayout() ?: return null
-        val hitSlop = dp(8f)
-        val selectedRect = layout.selectedRect
-        if (layout.selectedIndex in thumbnails.indices && selectedRect != null && containsWithSlop(selectedRect, x, y, hitSlop)) {
-            return layout.selectedIndex
+    private fun centerSelectedThumbnail() {
+        val index = selectedIndex.takeIf { it in 0 until thumbnailAdapter.itemCount } ?: return
+        if (width <= 0 || itemSlotWidthPx <= 0) {
+            post { centerSelectedThumbnail() }
+            return
         }
-        for (i in layout.itemRects.indices) {
-            if (i == layout.selectedIndex) continue
-            if (containsWithSlop(layout.itemRects[i], x, y, hitSlop)) return i
-        }
-        if (!allowNearest) return null
-        if (y < -hitSlop || y > height + hitSlop) return null
-        return layout.itemRects.indices.minByOrNull { index ->
-            abs(layout.itemRects[index].centerX() - x)
+        suppressScrollCallbacks = true
+        thumbnailLayoutManager.scrollToPositionWithOffset(index, 0)
+        post {
+            updateCenteredSelection()
+            suppressScrollCallbacks = false
         }
     }
 
-    private fun containsWithSlop(rect: RectF, x: Float, y: Float, slop: Float): Boolean {
-        touchTargetRect.set(rect)
-        touchTargetRect.inset(-slop, -slop)
-        return touchTargetRect.contains(x, y)
+    private fun reportCenteredThumbnail(finished: Boolean) {
+        val timeMs = centeredTimeMs() ?: return
+        updateCenteredSelection()
+        if (!finished && lastReportedTimeMs == timeMs) return
+        lastReportedTimeMs = timeMs
+        onThumbnailScrubbed?.invoke(timeMs, finished)
     }
 
-    private fun movedPastTouchSlop(x: Float, y: Float): Boolean =
-        abs(x - touchDownX) > touchSlopPx || abs(y - touchDownY) > touchSlopPx
+    private fun updateCenteredSelection() {
+        val position = centeredPosition() ?: return
+        if (position == selectedIndex) return
+        selectedIndex = position
+        thumbnailAdapter.setSelectedIndex(position)
+    }
 
-    private fun resetTouchState() {
-        touchDown = false
-        touchDragged = false
-        lastTouchIndex = -1
-        isPressed = false
+    private fun centeredPosition(): Int? {
+        val count = childCount
+        if (count <= 0) return null
+        val centerX = width / 2f
+        var bestPosition = NO_POSITION
+        var bestDistance = Float.MAX_VALUE
+        for (i in 0 until count) {
+            val child = getChildAt(i)
+            val position = getChildAdapterPosition(child)
+            if (position == NO_POSITION) continue
+            val childCenter = childCenterX(child)
+            val distance = abs(childCenter - centerX)
+            if (distance < bestDistance) {
+                bestDistance = distance
+                bestPosition = position
+            }
+        }
+        return bestPosition.takeIf { it != NO_POSITION }
+    }
+
+    private fun centeredTimeMs(): Long? {
+        val itemCount = thumbnailAdapter.itemCount
+        if (itemCount <= 0 || childCount <= 0) return null
+        val centerX = width / 2f
+        var leftPosition = NO_POSITION
+        var leftCenter = -Float.MAX_VALUE
+        var rightPosition = NO_POSITION
+        var rightCenter = Float.MAX_VALUE
+        var nearestPosition = NO_POSITION
+        var nearestDistance = Float.MAX_VALUE
+
+        for (i in 0 until childCount) {
+            val child = getChildAt(i)
+            val position = getChildAdapterPosition(child)
+            if (position == NO_POSITION) continue
+            val childCenter = childCenterX(child)
+            val distance = abs(childCenter - centerX)
+            if (distance < nearestDistance) {
+                nearestDistance = distance
+                nearestPosition = position
+            }
+            if (childCenter <= centerX && childCenter > leftCenter) {
+                leftCenter = childCenter
+                leftPosition = position
+            }
+            if (childCenter >= centerX && childCenter < rightCenter) {
+                rightCenter = childCenter
+                rightPosition = position
+            }
+        }
+
+        if (leftPosition != NO_POSITION && rightPosition != NO_POSITION) {
+            val leftTime = thumbnailAdapter.timeMsAt(leftPosition)
+            val rightTime = thumbnailAdapter.timeMsAt(rightPosition)
+            if (leftTime == null || rightTime == null) return null
+            if (leftPosition == rightPosition || abs(rightCenter - leftCenter) < 0.001f) return leftTime
+            val fraction = ((centerX - leftCenter) / (rightCenter - leftCenter)).coerceIn(0f, 1f)
+            return (
+                leftTime.toDouble() +
+                    (rightTime - leftTime).toDouble() * fraction.toDouble()
+            ).roundToLong().coerceToDuration()
+        }
+
+        return thumbnailAdapter.timeMsAt(nearestPosition)?.coerceToDuration()
+    }
+
+    private fun childCenterX(child: View): Float =
+        (thumbnailLayoutManager.getDecoratedLeft(child) + thumbnailLayoutManager.getDecoratedRight(child)) / 2f
+
+    private fun Long.coerceToDuration(): Long {
+        val maxMs = durationMs.takeIf { it > 0L } ?: return coerceAtLeast(0L)
+        return coerceIn(0L, maxMs)
     }
 
     private fun drawEmpty(canvas: Canvas) {
@@ -279,31 +307,262 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
         canvas.drawRoundRect(dstRect, radius, radius, placeholderPaint)
     }
 
-    private fun drawThumb(
-        canvas: Canvas,
-        item: SponsorSubmitThumbnail,
-        rect: RectF,
-        selected: Boolean,
-    ) {
-        val radius = dp(if (selected) 12f else 9f)
-        if (selected) {
-            val halo = RectF(rect).apply { inset(-dp(5f), -dp(5f)) }
-            canvas.drawRoundRect(halo, radius + dp(5f), radius + dp(5f), selectedHaloPaint)
+    private fun drawFixedSelection(canvas: Canvas) {
+        if (thumbnailAdapter.itemCount <= 0) return
+        val rect = centerSelectionRect() ?: return
+        val radius = dp(12f)
+        val halo = RectF(rect).apply { inset(-dp(5f), -dp(5f)) }
+        canvas.drawRoundRect(halo, radius + dp(5f), radius + dp(5f), selectedHaloPaint)
+        val strokeRect = RectF(rect)
+        val inset = selectedStrokePaint.strokeWidth / 2f
+        strokeRect.inset(inset, inset)
+        canvas.drawRoundRect(strokeRect, radius, radius, selectedStrokePaint)
+    }
+
+    private fun centerSelectionRect(): RectF? {
+        if (width <= 0 || height <= 0) return null
+        val verticalPadding = dp(5f)
+        val selectedScale = 1.07f
+        val contentHeight = (height - verticalPadding * 2f).coerceAtLeast(1f)
+        val aspect = aspectWidth.toFloat() / aspectHeight.coerceAtLeast(1).toFloat()
+        val baseHeight = contentHeight / selectedScale
+        val baseWidth = baseHeight * aspect.coerceAtLeast(0.0001f)
+        val selectedWidth = (baseWidth * selectedScale).coerceAtMost(width.toFloat())
+        val selectedHeight = (baseHeight * selectedScale).coerceAtMost(contentHeight)
+        val left = (width - selectedWidth) / 2f
+        val top = verticalPadding + ((contentHeight - selectedHeight) / 2f).coerceAtLeast(0f)
+        overlayRect.set(left, top, left + selectedWidth, top + selectedHeight)
+        return overlayRect
+    }
+
+    private fun updateItemMetrics() {
+        if (width <= 0 || height <= 0) return
+        val gap = dp(10f)
+        val verticalPadding = dp(5f)
+        val selectedScale = 1.07f
+        val contentHeight = (height - verticalPadding * 2f).coerceAtLeast(1f)
+        val aspect = aspectWidth.toFloat() / aspectHeight.coerceAtLeast(1).toFloat()
+        val itemHeight = contentHeight / selectedScale
+        val itemWidth = itemHeight * aspect.coerceAtLeast(0.0001f)
+        val slotWidth = (itemWidth + gap).roundToInt().coerceAtLeast(1)
+        if (itemSlotWidthPx != slotWidth) {
+            itemSlotWidthPx = slotWidth
+            thumbnailAdapter.setItemSlotWidth(slotWidth)
         }
+        val sidePadding = ((width - slotWidth) / 2f).roundToInt().coerceAtLeast(0)
+        if (paddingLeft != sidePadding || paddingRight != sidePadding) {
+            setPadding(sidePadding, paddingTop, sidePadding, paddingBottom)
+        }
+        invalidateItemDecorations()
+    }
+
+    private val dstRect = RectF()
+    private fun dp(value: Float): Float =
+        TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics)
+
+    private fun playerFocusStrokeColor(): Int = ContextCompat.getColor(context, R.color.blbl_blue)
+}
+
+private class SponsorSubmitThumbnailAdapter(
+    private val onClick: (position: Int, timeMs: Long) -> Unit,
+) : RecyclerView.Adapter<SponsorSubmitThumbnailAdapter.Vh>() {
+    private val timesSec = ArrayList<Int>()
+    private var selectedIndex: Int = -1
+    private var aspectWidth: Int = 16
+    private var aspectHeight: Int = 9
+    private var itemSlotWidth: Int = ViewGroup.LayoutParams.WRAP_CONTENT
+    private var scope: CoroutineScope? = null
+    private var frameLoader: (suspend (timeSec: Int) -> SpriteFrame?)? = null
+
+    init {
+        setHasStableIds(true)
+    }
+
+    fun setFrameLoader(
+        scope: CoroutineScope,
+        loader: suspend (timeSec: Int) -> SpriteFrame?,
+    ) {
+        this.scope = scope
+        frameLoader = loader
+    }
+
+    fun submit(times: List<Int>) {
+        if (timesSec == times) return
+        timesSec.clear()
+        timesSec.addAll(times)
+        if (selectedIndex !in timesSec.indices) selectedIndex = -1
+        notifyDataSetChanged()
+    }
+
+    fun setSelectedIndex(index: Int) {
+        selectedIndex = index.takeIf { it in timesSec.indices } ?: -1
+    }
+
+    fun setContentAspectRatio(width: Int, height: Int) {
+        val w = width.coerceAtLeast(1)
+        val h = height.coerceAtLeast(1)
+        if (aspectWidth == w && aspectHeight == h) return
+        aspectWidth = w
+        aspectHeight = h
+        if (itemCount > 0) notifyItemRangeChanged(0, itemCount)
+    }
+
+    fun setItemSlotWidth(width: Int) {
+        val safeWidth = width.coerceAtLeast(1)
+        if (itemSlotWidth == safeWidth) return
+        itemSlotWidth = safeWidth
+        if (itemCount > 0) notifyItemRangeChanged(0, itemCount)
+    }
+
+    fun timeMsAt(position: Int): Long? =
+        timesSec.getOrNull(position)?.coerceAtLeast(0)?.toLong()?.times(1000L)
+
+    override fun getItemId(position: Int): Long = timesSec[position].toLong()
+
+    override fun getItemCount(): Int = timesSec.size
+
+    override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Vh {
+        val view = SponsorSubmitThumbnailItemView(parent.context)
+        view.layoutParams =
+            RecyclerView.LayoutParams(
+                itemSlotWidth.coerceAtLeast(1),
+                RecyclerView.LayoutParams.MATCH_PARENT,
+            )
+        return Vh(view)
+    }
+
+    override fun onBindViewHolder(holder: Vh, position: Int) {
+        val timeSec = timesSec[position].coerceAtLeast(0)
+        val boundScope = scope
+        val boundLoader = frameLoader
+        holder.bind(
+            timeSec = timeSec,
+            aspectWidth = aspectWidth,
+            aspectHeight = aspectHeight,
+            itemSlotWidth = itemSlotWidth,
+            scope = boundScope,
+            frameLoader = boundLoader,
+            onClick = { onClick(position, timeSec.toLong() * 1000L) },
+        )
+    }
+
+    override fun onViewRecycled(holder: Vh) {
+        holder.clear()
+    }
+
+    class Vh(private val view: SponsorSubmitThumbnailItemView) : RecyclerView.ViewHolder(view) {
+        private var frameJob: Job? = null
+        private var boundTimeSec: Int = -1
+
+        fun bind(
+            timeSec: Int,
+            aspectWidth: Int,
+            aspectHeight: Int,
+            itemSlotWidth: Int,
+            scope: CoroutineScope?,
+            frameLoader: (suspend (timeSec: Int) -> SpriteFrame?)?,
+            onClick: () -> Unit,
+        ) {
+            boundTimeSec = timeSec
+            frameJob?.cancel()
+            view.layoutParams =
+                (view.layoutParams ?: RecyclerView.LayoutParams(itemSlotWidth, RecyclerView.LayoutParams.MATCH_PARENT)).also {
+                    it.width = itemSlotWidth.coerceAtLeast(1)
+                    it.height = RecyclerView.LayoutParams.MATCH_PARENT
+                }
+            view.setContentAspectRatio(aspectWidth, aspectHeight)
+            view.setFrame(null)
+            view.setOnClickListener { onClick() }
+
+            if (scope == null || frameLoader == null) return
+            frameJob =
+                scope.launch {
+                    val frame =
+                        try {
+                            frameLoader(timeSec)
+                        } catch (t: Throwable) {
+                            if (t is CancellationException) throw t
+                            null
+                        }
+                    if (boundTimeSec == timeSec && frame != null) {
+                        view.setFrame(frame)
+                    }
+                }
+        }
+
+        fun clear() {
+            frameJob?.cancel()
+            frameJob = null
+            boundTimeSec = -1
+            view.setOnClickListener(null)
+            view.setFrame(null)
+        }
+    }
+}
+
+private class SponsorSubmitThumbnailItemView(context: Context) : View(context) {
+    private val bitmapPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+    private val placeholderPaint =
+        Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.FILL
+            color = 0xCC000000.toInt()
+        }
+    private val srcRect = Rect()
+    private val dstRect = RectF()
+    private val clipPath = Path()
+    private var frame: SpriteFrame? = null
+    private var aspectWidth: Int = 16
+    private var aspectHeight: Int = 9
+
+    init {
+        isClickable = true
+        isFocusable = false
+    }
+
+    fun setFrame(frame: SpriteFrame?) {
+        this.frame = frame
+        invalidate()
+    }
+
+    fun setContentAspectRatio(width: Int, height: Int) {
+        val w = width.coerceAtLeast(1)
+        val h = height.coerceAtLeast(1)
+        if (aspectWidth == w && aspectHeight == h) return
+        aspectWidth = w
+        aspectHeight = h
+        invalidate()
+    }
+
+    override fun onDraw(canvas: Canvas) {
+        super.onDraw(canvas)
+        val rect = thumbnailRect()
+        val radius = dp(9f)
+        val itemFrame = frame
+        if (itemFrame == null) {
+            canvas.drawRoundRect(rect, radius, radius, placeholderPaint)
+            return
+        }
+
         clipPath.reset()
         clipPath.addRoundRect(rect, radius, radius, Path.Direction.CW)
         val checkpoint = canvas.save()
         canvas.clipPath(clipPath)
-        val frame = item.frame
-        updateDrawSourceRect(frame.srcRect)
-        canvas.drawBitmap(frame.spriteSheet, srcRect, rect, bitmapPaint)
-        if (!selected) canvas.drawRect(rect, dimPaint)
+        updateDrawSourceRect(itemFrame.srcRect)
+        canvas.drawBitmap(itemFrame.spriteSheet, srcRect, rect, bitmapPaint)
         canvas.restoreToCount(checkpoint)
-        if (selected) {
-            val inset = selectedStrokePaint.strokeWidth / 2f
-            val strokeRect = RectF(rect).apply { inset(inset, inset) }
-            canvas.drawRoundRect(strokeRect, radius, radius, selectedStrokePaint)
-        }
+    }
+
+    private fun thumbnailRect(): RectF {
+        val verticalPadding = dp(5f)
+        val selectedScale = 1.07f
+        val contentHeight = (height - verticalPadding * 2f).coerceAtLeast(1f)
+        val aspect = aspectWidth.toFloat() / aspectHeight.coerceAtLeast(1).toFloat()
+        val itemHeight = contentHeight / selectedScale
+        val itemWidth = itemHeight * aspect.coerceAtLeast(0.0001f)
+        val left = (width - itemWidth) / 2f
+        val top = verticalPadding + ((contentHeight - itemHeight) / 2f).coerceAtLeast(0f)
+        dstRect.set(left, top, left + itemWidth, top + itemHeight)
+        return dstRect
     }
 
     private fun updateDrawSourceRect(cellRect: Rect) {
@@ -330,8 +589,6 @@ class SponsorSubmitThumbnailStripView @JvmOverloads constructor(
 
     private fun dp(value: Float): Float =
         TypedValue.applyDimension(TypedValue.COMPLEX_UNIT_DIP, value, resources.displayMetrics)
-
-    private fun playerFocusStrokeColor(): Int = ContextCompat.getColor(context, R.color.blbl_blue)
 }
 
 class SponsorSubmitTimelineView @JvmOverloads constructor(

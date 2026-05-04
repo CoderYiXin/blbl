@@ -168,6 +168,12 @@ internal class SponsorSubmitDraftState(
         }
     }
 
+    fun deleteCompleteSegments(): Boolean {
+        val completePairIds = drafts().filter { it.isComplete }.mapTo(HashSet()) { it.pairId }
+        if (completePairIds.isEmpty()) return false
+        return markers.removeAll { it.pairId in completePairIds }
+    }
+
     private fun clampToDuration(timeMs: Long, durationMs: Long): Long {
         val duration = durationMs.coerceAtLeast(0L)
         return if (duration > 0L) timeMs.coerceIn(0L, duration) else timeMs.coerceAtLeast(0L)

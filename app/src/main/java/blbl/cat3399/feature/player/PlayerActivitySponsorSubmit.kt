@@ -17,7 +17,6 @@ import kotlin.math.abs
 import kotlin.math.max
 
 private const val SPONSOR_SUBMIT_TAG = "PlayerSponsorSubmit"
-private const val SPONSOR_SUBMIT_THUMB_COUNT = 5
 private const val SPONSOR_SUBMIT_MARKER_TOLERANCE_MIN_MS = 800L
 private const val SPONSOR_SUBMIT_FAST_SEEK_STEPS = 4
 
@@ -43,15 +42,34 @@ internal fun PlayerActivity.initSponsorSubmitPanel() {
     binding.btnSponsorSubmitClose.setOnClickListener { hideSponsorSubmitPanel(restorePlayback = true) }
     binding.btnSponsorSubmitDelete.setOnClickListener { enterSponsorSubmitDeleteMode() }
     binding.btnSponsorSubmitUpload.setOnClickListener { showSponsorSubmitCategoryPicker() }
+    binding.sponsorSubmitThumbnails.setFrameLoader(
+        scope = lifecycleScope,
+        loader = { timeSec ->
+            val shot = currentVideoShot ?: return@setFrameLoader null
+            val cache = videoShotImageCache ?: return@setFrameLoader null
+            shot.getSpriteFrame(timeSec, cache)
+        },
+    )
     binding.sponsorSubmitTimeline.setTouchCallbacks(
-        onCursorChanged = { timeMs, finished -> handleSponsorSubmitTimelineTouch(timeMs, finished) },
-        onMarkerDragStarted = { marker -> handleSponsorSubmitMarkerTouchStart(marker) },
-        onMarkerDragged = { marker, timeMs, finished -> handleSponsorSubmitMarkerTouchDrag(marker, timeMs, finished) },
-        onMarkerClicked = { marker -> handleSponsorSubmitMarkerTouchClick(marker) },
+        onCursorChanged = { timeMs, _ -> moveSponsorSubmitCursorTo(timeMs, loadThumbnails = true) },
+        onMarkerDragStarted = { marker -> selectSponsorSubmitMarker(marker, loadThumbnails = false) },
+        onMarkerDragged = { marker, timeMs, finished -> dragSponsorSubmitMarker(marker, timeMs, finished) },
+        onMarkerClicked = { marker -> clickSponsorSubmitMarker(marker) },
     )
     binding.sponsorSubmitThumbnails.setTouchCallbacks(
-        onThumbnailScrubbed = { timeMs, finished -> handleSponsorSubmitThumbnailTouch(timeMs, finished) },
-        onThumbnailClicked = { timeMs -> handleSponsorSubmitThumbnailClick(timeMs) },
+        onThumbnailScrubbed = { timeMs, finished ->
+            if (
+                moveSponsorSubmitCursorTo(
+                    timeMs = timeMs,
+                    loadThumbnails = finished,
+                    requestTimelineFocus = false,
+                ) &&
+                finished
+            ) {
+                noteUserInteraction()
+            }
+        },
+        onThumbnailClicked = { timeMs -> clickSponsorSubmitThumbnail(timeMs) },
     )
     updateSponsorSubmitPanelUi(loadThumbnails = false)
 }
@@ -98,8 +116,6 @@ internal fun PlayerActivity.hideSponsorSubmitPanel(restorePlayback: Boolean) {
     val state = sponsorSubmitPanelState
     val shouldResume = restorePlayback && state.wasPlayingBeforeOpen
 
-    sponsorSubmitThumbJob?.cancel()
-    sponsorSubmitThumbJob = null
     sponsorSubmitUploadJob?.cancel()
     sponsorSubmitUploadJob = null
     state.submitting = false
@@ -128,7 +144,16 @@ internal fun PlayerActivity.dispatchSponsorSubmitPanelKey(event: KeyEvent): Bool
     if (!isSponsorSubmitPanelVisible()) return false
     val keyCode = event.keyCode
     if (!isSponsorSubmitHandledKey(keyCode)) return true
-    if (event.action == KeyEvent.ACTION_UP) return true
+    if (event.action == KeyEvent.ACTION_UP) {
+        if (
+            isSponsorSubmitConfirmKey(keyCode) &&
+            sponsorSubmitPanelState.mode == SponsorSubmitInteractionMode.MARK &&
+            performSponsorSubmitFocusedButton()
+        ) {
+            return true
+        }
+        return true
+    }
     if (event.action != KeyEvent.ACTION_DOWN) return true
 
     if (isInteractionKey(keyCode)) noteUserInteraction()
@@ -170,8 +195,8 @@ internal fun PlayerActivity.dispatchSponsorSubmitPanelKey(event: KeyEvent): Bool
         KeyEvent.KEYCODE_NUMPAD_ENTER,
         KeyEvent.KEYCODE_BUTTON_A,
         -> {
-            if (binding.sponsorSubmitButtonRow.hasFocus() && state.mode == SponsorSubmitInteractionMode.MARK) {
-                currentFocus?.performClick()
+            if (state.mode == SponsorSubmitInteractionMode.MARK && hasSponsorSubmitFocusedButton()) {
+                Unit
             } else {
                 handleSponsorSubmitCenter()
             }
@@ -179,6 +204,46 @@ internal fun PlayerActivity.dispatchSponsorSubmitPanelKey(event: KeyEvent): Bool
         }
 
         else -> true
+    }
+}
+
+private fun isSponsorSubmitConfirmKey(keyCode: Int): Boolean =
+    when (keyCode) {
+        KeyEvent.KEYCODE_DPAD_CENTER,
+        KeyEvent.KEYCODE_ENTER,
+        KeyEvent.KEYCODE_NUMPAD_ENTER,
+        KeyEvent.KEYCODE_BUTTON_A,
+        -> true
+        else -> false
+    }
+
+private fun PlayerActivity.hasSponsorSubmitFocusedButton(): Boolean =
+    when (currentFocus) {
+        binding.btnSponsorSubmitUpload,
+        binding.btnSponsorSubmitDelete,
+        binding.btnSponsorSubmitClose,
+        -> true
+        else -> false
+    }
+
+private fun PlayerActivity.performSponsorSubmitFocusedButton(): Boolean {
+    val focused = currentFocus
+    return when (focused) {
+        binding.btnSponsorSubmitUpload -> {
+            if (!binding.btnSponsorSubmitUpload.isEnabled) return false
+            showSponsorSubmitCategoryPicker()
+            true
+        }
+        binding.btnSponsorSubmitDelete -> {
+            if (!binding.btnSponsorSubmitDelete.isEnabled) return false
+            enterSponsorSubmitDeleteMode()
+            true
+        }
+        binding.btnSponsorSubmitClose -> {
+            hideSponsorSubmitPanel(restorePlayback = true)
+            true
+        }
+        else -> false
     }
 }
 
@@ -264,11 +329,15 @@ private fun PlayerActivity.placeSponsorSubmitMarkerAtCursor(loadThumbnails: Bool
     }
 }
 
-private fun PlayerActivity.handleSponsorSubmitTimelineTouch(timeMs: Long, finished: Boolean) {
+private fun PlayerActivity.moveSponsorSubmitCursorTo(
+    timeMs: Long,
+    loadThumbnails: Boolean,
+    requestTimelineFocus: Boolean = true,
+): Boolean {
     val state = sponsorSubmitPanelState
-    if (state.submitting) return
+    if (state.submitting) return false
     val duration = resolveSponsorSubmitDurationMs()
-    if (duration <= 0L) return
+    if (duration <= 0L) return false
 
     if (state.mode == SponsorSubmitInteractionMode.MOVE) {
         state.mode = SponsorSubmitInteractionMode.MARK
@@ -281,58 +350,33 @@ private fun PlayerActivity.handleSponsorSubmitTimelineTouch(timeMs: Long, finish
             state.draft.nearestMarkerAt(state.cursorMs, sponsorSubmitMarkerToleranceMs())?.id
                 ?: state.selectedMarkerId
     }
-    focusSponsorSubmitTimeline()
-    updateSponsorSubmitPanelUi(loadThumbnails = finished)
+    if (requestTimelineFocus) focusSponsorSubmitTimeline()
+    updateSponsorSubmitPanelUi(loadThumbnails = loadThumbnails)
+    return true
 }
 
-private fun PlayerActivity.handleSponsorSubmitThumbnailTouch(timeMs: Long, finished: Boolean) {
-    val state = sponsorSubmitPanelState
-    if (state.submitting) return
-    val duration = resolveSponsorSubmitDurationMs()
-    if (duration <= 0L) return
-
-    if (state.mode == SponsorSubmitInteractionMode.MOVE) {
-        state.mode = SponsorSubmitInteractionMode.MARK
-        state.selectedMarkerId = null
-        state.movingMarkerId = null
-    }
-    state.cursorMs = timeMs.coerceIn(0L, duration)
-    if (state.mode == SponsorSubmitInteractionMode.DELETE) {
-        state.selectedMarkerId =
-            state.draft.nearestMarkerAt(state.cursorMs, sponsorSubmitMarkerToleranceMs())?.id
-                ?: state.selectedMarkerId
-    }
-    focusSponsorSubmitTimeline()
-    if (finished) noteUserInteraction()
-    updateSponsorSubmitPanelUi(loadThumbnails = true)
-}
-
-private fun PlayerActivity.handleSponsorSubmitThumbnailClick(timeMs: Long) {
-    val state = sponsorSubmitPanelState
-    if (state.submitting) return
-    val duration = resolveSponsorSubmitDurationMs()
-    if (duration <= 0L) return
-
-    state.cursorMs = timeMs.coerceIn(0L, duration)
-    if (state.mode == SponsorSubmitInteractionMode.MARK) {
-        placeSponsorSubmitMarkerAtCursor(loadThumbnails = false)
+private fun PlayerActivity.clickSponsorSubmitThumbnail(timeMs: Long) {
+    if (!moveSponsorSubmitCursorTo(timeMs, loadThumbnails = false)) return
+    if (sponsorSubmitPanelState.mode == SponsorSubmitInteractionMode.MARK) {
+        handleSponsorSubmitCenter()
     } else {
         updateSponsorSubmitPanelUi(loadThumbnails = true)
     }
 }
 
-private fun PlayerActivity.handleSponsorSubmitMarkerTouchStart(marker: SponsorSubmitMarker) {
+private fun PlayerActivity.selectSponsorSubmitMarker(marker: SponsorSubmitMarker, loadThumbnails: Boolean): Boolean {
     val state = sponsorSubmitPanelState
-    if (state.submitting) return
+    if (state.submitting) return false
 
     state.cursorMs = marker.timeMs
     state.selectedMarkerId = marker.id
     state.movingMarkerId = null
     focusSponsorSubmitTimeline()
-    updateSponsorSubmitPanelUi(loadThumbnails = false)
+    updateSponsorSubmitPanelUi(loadThumbnails = loadThumbnails)
+    return true
 }
 
-private fun PlayerActivity.handleSponsorSubmitMarkerTouchDrag(
+private fun PlayerActivity.dragSponsorSubmitMarker(
     marker: SponsorSubmitMarker,
     timeMs: Long,
     finished: Boolean,
@@ -360,17 +404,12 @@ private fun PlayerActivity.handleSponsorSubmitMarkerTouchDrag(
     updateSponsorSubmitPanelUi(loadThumbnails = finished)
 }
 
-private fun PlayerActivity.handleSponsorSubmitMarkerTouchClick(marker: SponsorSubmitMarker) {
-    val state = sponsorSubmitPanelState
-    if (state.submitting) return
-
-    state.cursorMs = marker.timeMs
-    state.selectedMarkerId = marker.id
-    state.movingMarkerId = null
-    if (state.mode == SponsorSubmitInteractionMode.DELETE) {
+private fun PlayerActivity.clickSponsorSubmitMarker(marker: SponsorSubmitMarker) {
+    if (!selectSponsorSubmitMarker(marker, loadThumbnails = false)) return
+    if (sponsorSubmitPanelState.mode == SponsorSubmitInteractionMode.DELETE) {
         deleteSelectedSponsorSubmitMarker()
     } else {
-        state.mode = SponsorSubmitInteractionMode.MARK
+        sponsorSubmitPanelState.mode = SponsorSubmitInteractionMode.MARK
         updateSponsorSubmitPanelUi(loadThumbnails = true)
     }
 }
@@ -570,48 +609,17 @@ private fun PlayerActivity.updateSponsorSubmitThumbnails() {
     val shot = currentVideoShot
     val cache = videoShotImageCache
     if (shot == null || cache == null || shot.times.isEmpty()) {
-        sponsorSubmitThumbJob?.cancel()
-        sponsorSubmitThumbJob = null
         binding.sponsorSubmitThumbnails.clearThumbnails()
         return
     }
 
     val cursorSec = (sponsorSubmitPanelState.cursorMs / 1000L).toInt().coerceAtLeast(0)
     val centerIndex = shot.times.closestIndexTo(cursorSec)
-    val range = sponsorSubmitThumbnailIndexRange(centerIndex = centerIndex, size = shot.times.size)
-    val selectedIndexInRange = (centerIndex - range.first).coerceIn(0, range.last - range.first)
-
-    sponsorSubmitThumbJob?.cancel()
-    sponsorSubmitThumbJob =
-        lifecycleScope.launch {
-            val items =
-                runCatching {
-                    range.map { index ->
-                        val timeSec = shot.times[index].coerceAtLeast(0)
-                        SponsorSubmitThumbnail(
-                            timeMs = timeSec.toLong() * 1000L,
-                            frame = shot.getSpriteFrame(timeSec, cache),
-                        )
-                    }
-                }.getOrElse { t ->
-                    if (t is CancellationException) throw t
-                    AppLog.w(SPONSOR_SUBMIT_TAG, "load thumbnail failed", t)
-                    emptyList()
-                }
-            if (!isActive) return@launch
-            if (items.isEmpty()) {
-                binding.sponsorSubmitThumbnails.clearThumbnails()
-            } else {
-                binding.sponsorSubmitThumbnails.setThumbnails(items, selectedIndexInRange)
-            }
-        }
-}
-
-private fun sponsorSubmitThumbnailIndexRange(centerIndex: Int, size: Int): IntRange {
-    val count = SPONSOR_SUBMIT_THUMB_COUNT.coerceAtMost(size.coerceAtLeast(1))
-    val half = count / 2
-    val start = (centerIndex - half).coerceIn(0, (size - count).coerceAtLeast(0))
-    return start until (start + count)
+    binding.sponsorSubmitThumbnails.setThumbnailTimes(
+        timesSec = shot.times,
+        selectedIndex = centerIndex,
+        durationMs = resolveSponsorSubmitDurationMs(),
+    )
 }
 
 private fun List<Int>.closestIndexTo(target: Int): Int {
@@ -745,22 +753,14 @@ private fun PlayerActivity.submitSponsorSubmitSegments(category: SponsorSubmitCa
                 if (!isActive) return@launch
                 logSponsorSubmitResultSegments(bvid = bvid, cid = cid, result = submitResult)
 
-                val remoteResult =
-                    withContext(Dispatchers.IO) {
-                        SponsorBlockApi.skipSegments(bvid = bvid, cid = cid, forceRefresh = true)
-                    }
-                if (!isActive) return@launch
-                logSponsorSubmitRemoteSegments(bvid = bvid, cid = cid, result = remoteResult)
-
-                if (currentBvid == bvid && currentCid == cid) {
-                    applySponsorSubmitAutoSkipRefresh(
-                        submitResult = submitResult,
-                        remoteResult = remoteResult,
-                        fallbackSegments = apiSegments,
-                    )
-                }
-
                 if (submitResult.state == SponsorBlockApi.SubmitState.SUCCESS) {
+                    if (currentBvid == bvid && currentCid == cid) {
+                        sponsorSubmitPanelState.draft.deleteCompleteSegments()
+                        sponsorSubmitPanelState.mode = SponsorSubmitInteractionMode.MARK
+                        sponsorSubmitPanelState.selectedMarkerId = null
+                        sponsorSubmitPanelState.movingMarkerId = null
+                        applySponsorSubmitLocalAutoSkipSegments(apiSegments)
+                    }
                     AppToast.show(this@submitSponsorSubmitSegments, "已上传${apiSegments.size}段片段")
                 } else {
                     AppToast.showLong(this@submitSponsorSubmitSegments, submitResult.detail ?: "上传失败")
@@ -797,55 +797,25 @@ private fun PlayerActivity.logSponsorSubmitResultSegments(
     }
 }
 
-private fun PlayerActivity.logSponsorSubmitRemoteSegments(
-    bvid: String,
-    cid: Long,
-    result: SponsorBlockApi.FetchResult,
+private fun PlayerActivity.applySponsorSubmitLocalAutoSkipSegments(
+    submittedSegments: List<SponsorBlockApi.SubmitSegment>,
 ) {
-    val detail = result.detail?.takeIf { it.isNotBlank() } ?: "-"
-    AppLog.i(
-        SPONSOR_SUBMIT_TAG,
-        "remote sponsorblock bvid=$bvid cid=$cid state=${result.state.name.lowercase()} " +
-            "count=${result.segments.size} detail=$detail",
-    )
-    result.segments.forEachIndexed { index, segment ->
-        AppLog.i(
-            SPONSOR_SUBMIT_TAG,
-            "remote sponsorblock[$index] bvid=$bvid cid=$cid uuid=${segment.uuid.orEmpty()} " +
-                "category=${segment.category.orEmpty()} action=${segment.actionType.orEmpty()} " +
-                "startMs=${segment.startMs} endMs=${segment.endMs}",
-        )
-    }
-}
-
-private fun PlayerActivity.applySponsorSubmitAutoSkipRefresh(
-    submitResult: SponsorBlockApi.SubmitResult,
-    remoteResult: SponsorBlockApi.FetchResult,
-    fallbackSegments: List<SponsorBlockApi.SubmitSegment>,
-) {
-    val nonSponsorBlockSegments = autoSkipSegments.filter { it.source != "sponsorblock" }
-    val next =
-        if (remoteResult.state == SponsorBlockApi.FetchState.SUCCESS) {
-            mergeAutoSkipSegments(nonSponsorBlockSegments, remoteResult.segments)
-        } else if (submitResult.state == SponsorBlockApi.SubmitState.SUCCESS) {
-            val localSubmitted =
-                fallbackSegments.map { segment ->
-                    SkipSegment(
-                        id = "sb:local:${currentBvid}:${currentCid}:${segment.category}:${segment.startMs}-${segment.endMs}",
-                        startMs = segment.startMs,
-                        endMs = segment.endMs,
-                        category = segment.category,
-                        source = "sponsorblock",
-                        actionType = segment.actionType,
-                    )
-                }
-            (autoSkipSegments + localSubmitted)
-                .associateBy { it.id }
-                .values
-                .toList()
-        } else {
-            return
+    val localSubmitted =
+        submittedSegments.map { segment ->
+            SkipSegment(
+                id = "sb:local:${currentBvid}:${currentCid}:${segment.category}:${segment.startMs}-${segment.endMs}",
+                startMs = segment.startMs,
+                endMs = segment.endMs,
+                category = segment.category,
+                source = "sponsorblock",
+                actionType = segment.actionType,
+            )
         }
+    val next =
+        (autoSkipSegments + localSubmitted)
+            .associateBy { it.id }
+            .values
+            .toList()
 
     setAutoSkipSegments(autoSkipToken, next)
     maybeUpdateAutoSkipSegmentMarkers(durationMs = resolveSponsorSubmitDurationMs())

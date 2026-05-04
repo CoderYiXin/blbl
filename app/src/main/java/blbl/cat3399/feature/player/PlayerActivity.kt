@@ -155,7 +155,6 @@ class PlayerActivity : BaseActivity() {
     internal var seekHintJob: kotlinx.coroutines.Job? = null
     internal var keyScrubEndJob: kotlinx.coroutines.Job? = null
     internal val sponsorSubmitPanelState = SponsorSubmitPanelState()
-    internal var sponsorSubmitThumbJob: Job? = null
     internal var sponsorSubmitUploadJob: Job? = null
     internal var keyScrubPendingSeekToMs: Long? = null
     internal var scrubbing: Boolean = false
@@ -1901,7 +1900,6 @@ class PlayerActivity : BaseActivity() {
         holdSeekJob?.cancel()
         seekHintJob?.cancel()
         keyScrubEndJob?.cancel()
-        sponsorSubmitThumbJob?.cancel()
         sponsorSubmitUploadJob?.cancel()
         releaseTouchGestures()
         videoShotFetchJob?.cancel()
