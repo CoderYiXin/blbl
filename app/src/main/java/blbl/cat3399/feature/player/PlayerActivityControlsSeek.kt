@@ -687,7 +687,11 @@ internal fun PlayerActivity.resolveSeekUiBufferedPositionMs(
     return buffered
 }
 
-internal fun PlayerActivity.showSeekHint(text: String, hold: Boolean) {
+internal fun PlayerActivity.showSeekHint(
+    text: String,
+    hold: Boolean,
+    hideDelayMs: Long = PlayerActivity.SEEK_HINT_HIDE_DELAY_MS,
+) {
     // Auto-next preview hint has the highest priority: while it's visible, ignore any other hint requests.
     // This keeps the UX stable in the last 2 seconds (no flicker from volume/brightness/shortcuts/etc).
     if (autoNextHintVisible) {
@@ -697,10 +701,10 @@ internal fun PlayerActivity.showSeekHint(text: String, hold: Boolean) {
     binding.tvSeekHint.text = text
     binding.tvSeekHint.visibility = View.VISIBLE
     seekHintJob?.cancel()
-    if (!hold) scheduleHideSeekHint()
+    if (!hold) scheduleHideSeekHint(hideDelayMs)
 }
 
-internal fun PlayerActivity.scheduleHideSeekHint() {
+internal fun PlayerActivity.scheduleHideSeekHint(hideDelayMs: Long = PlayerActivity.SEEK_HINT_HIDE_DELAY_MS) {
     // Keep the auto-next hint visible until:
     // - user cancels (BACK), or
     // - playback ends and we transition.
@@ -708,7 +712,7 @@ internal fun PlayerActivity.scheduleHideSeekHint() {
     seekHintJob?.cancel()
     seekHintJob =
         lifecycleScope.launch {
-            delay(PlayerActivity.SEEK_HINT_HIDE_DELAY_MS)
+            delay(hideDelayMs)
             binding.tvSeekHint.visibility = View.GONE
         }
 }

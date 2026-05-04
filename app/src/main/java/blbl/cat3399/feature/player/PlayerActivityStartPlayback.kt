@@ -95,6 +95,20 @@ private fun resolveCurrentVodDurationMsFromDetail(detail: VideoDetail, cid: Long
     )
 }
 
+private fun PlayerActivity.showPlaybackTitleHintIfFullscreen(rawTitle: String?): Boolean {
+    if (osdMode != PlayerActivity.OsdMode.Hidden) return false
+    val fallbackTitle =
+        binding.tvTitle.text
+            ?.toString()
+            ?.trim()
+            ?.takeIf { it.isNotBlank() && it != "-" }
+            ?: currentMainTitle?.trim()?.takeIf { it.isNotBlank() && it != "-" }
+            ?: return false
+    val title = formatAutoNextHintTitle(rawTitle, fallbackTitle = fallbackTitle)
+    showSeekHint("正在播放 $title", hold = false, hideDelayMs = PlayerActivity.PLAYBACK_TITLE_HINT_HIDE_DELAY_MS)
+    return true
+}
+
 internal fun PlayerActivity.resetPlaybackStateForNewMedia(
     engine: BlblPlayerEngine,
     preservePartsList: Boolean,
@@ -225,6 +239,7 @@ internal fun PlayerActivity.startPlayback(
     seasonIdExtra: Long? = null,
     initialTitle: String?,
     startedFromList: PlayerVideoListKind? = null,
+    showTitleHint: Boolean = false,
 ) {
     val engine = player ?: return
     val pendingSeekMs = pendingStartPositionMs
@@ -298,6 +313,10 @@ internal fun PlayerActivity.startPlayback(
         preservePartsList = startFromList == PlayerVideoListKind.PARTS,
     )
     updateTopTitleUi(placeholder = initialTitle)
+    var titleHintShown = false
+    if (showTitleHint) {
+        titleHintShown = showPlaybackTitleHintIfFullscreen(initialTitle)
+    }
 
     updatePlaylistControls()
     maybeWarmUpAutoNextTarget()
@@ -352,6 +371,9 @@ internal fun PlayerActivity.startPlayback(
 
                 detail.title?.trim()?.takeIf { it.isNotBlank() }?.let { currentMainTitle = it }
                 updateTopTitleUi(placeholder = initialTitle)
+                if (showTitleHint && !titleHintShown) {
+                    titleHintShown = showPlaybackTitleHintIfFullscreen(initialTitle ?: currentMainTitle)
+                }
                 applyUpInfo(detail)
                 applyTitleMeta(detail)
                 applyPlayerInfoVideoDetail(detail)
@@ -374,6 +396,9 @@ internal fun PlayerActivity.startPlayback(
                 if (startFromList != PlayerVideoListKind.PARTS || partsListItems.isEmpty() || partsListIndex !in partsListItems.indices) {
                     refreshPartsListFromDetail(detail, bvid = resolvedBvid)
                     updateTopTitleUi(placeholder = initialTitle)
+                    if (showTitleHint && !titleHintShown) {
+                        titleHintShown = showPlaybackTitleHintIfFullscreen(initialTitle ?: currentMainTitle)
+                    }
                 }
                 if (startFromList == PlayerVideoListKind.PAGE) {
                     updatePageListIndexForCurrentMedia(bvid = resolvedBvid, aid = currentAid, cid = cid)
