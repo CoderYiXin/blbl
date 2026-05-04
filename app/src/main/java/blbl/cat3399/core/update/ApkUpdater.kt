@@ -1,14 +1,18 @@
 package blbl.cat3399.core.update
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.net.Uri
+import android.os.Build
 import androidx.core.content.FileProvider
 import blbl.cat3399.BuildConfig
 import blbl.cat3399.core.net.BiliClient
 import blbl.cat3399.core.net.await
 import blbl.cat3399.core.net.ipv4OnlyDns
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
@@ -259,8 +263,7 @@ object ApkUpdater {
     }
 
     fun installApk(context: Context, apkFile: File) {
-        val authority = "${context.packageName}.fileprovider"
-        val uri = FileProvider.getUriForFile(context, authority, apkFile)
+        val uri = installUriFor(context, apkFile)
         val intent =
             Intent(Intent.ACTION_VIEW).apply {
                 addCategory(Intent.CATEGORY_DEFAULT)
@@ -268,7 +271,38 @@ object ApkUpdater {
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+        grantInstallerReadPermissions(context, intent, uri)
         context.startActivity(intent)
+    }
+
+    @SuppressLint("SetWorldReadable")
+    private fun installUriFor(context: Context, apkFile: File): Uri {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            val authority = "${context.packageName}.fileprovider"
+            FileProvider.getUriForFile(context, authority, apkFile)
+        } else {
+            apkFile.setReadable(true, false)
+            Uri.fromFile(apkFile)
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun grantInstallerReadPermissions(
+        context: Context,
+        intent: Intent,
+        uri: Uri,
+    ) {
+        if (uri.scheme != "content") return
+
+        val installers =
+            context.packageManager.queryIntentActivities(
+                intent,
+                PackageManager.MATCH_DEFAULT_ONLY,
+            )
+        for (installer in installers) {
+            val packageName = installer.activityInfo?.packageName ?: continue
+            context.grantUriPermission(packageName, uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
     }
 
     private fun formatBytes(bytes: Long): String {
