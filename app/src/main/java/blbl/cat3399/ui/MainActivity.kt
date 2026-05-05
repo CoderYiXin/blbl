@@ -220,7 +220,6 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
         }
         showLastCrashPromptIfNeeded()
         showIjkKernelUpdatePromptIfNeeded()
-        maybeStartAutoUpdateCheck()
         showAutoUpdatePromptIfReady()
     }
 
