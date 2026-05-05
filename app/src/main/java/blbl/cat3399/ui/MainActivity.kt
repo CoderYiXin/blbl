@@ -1006,10 +1006,11 @@ class MainActivity : BaseActivity(), SidebarFocusHost {
                 onDismiss = {
                     autoUpdatePromptPopup = null
                 },
-            ) {
+            ) { selectedUpdate ->
                 ApkUpdateFlow.startDownloadAndInstall(
                     activity = this,
-                    latestVersionHint = update.versionName,
+                    latestVersionHint = selectedUpdate.versionName,
+                    apkUrl = ApkUpdater.apkUrlFor(selectedUpdate.versionName),
                 )
             }
     }

@@ -1563,8 +1563,8 @@ class SettingsInteractionHandler(
                     }
 
                     is TestUpdateCheckState.UpdateAvailable -> {
-                        ApkUpdateFlow.showUpdatePrompt(activity, checkState.update) {
-                            startTestUpdateDownload(checkState.latestVersion)
+                        ApkUpdateFlow.showUpdatePrompt(activity, checkState.update) { selectedUpdate ->
+                            startTestUpdateDownload(selectedUpdate.versionName)
                         }
                     }
 
@@ -2701,8 +2701,8 @@ class SettingsInteractionHandler(
                         }
                     state.testUpdateCheckedAtMs = System.currentTimeMillis()
                     if (promptIfUpdate && state.testUpdateCheckState is TestUpdateCheckState.UpdateAvailable) {
-                        ApkUpdateFlow.showUpdatePrompt(activity, update) {
-                            startTestUpdateDownload(update.versionName)
+                        ApkUpdateFlow.showUpdatePrompt(activity, update) { selectedUpdate ->
+                            startTestUpdateDownload(selectedUpdate.versionName)
                         }
                     }
                 } catch (_: CancellationException) {
@@ -2725,19 +2725,9 @@ class SettingsInteractionHandler(
             ApkUpdateFlow.startDownloadAndInstall(
                 activity = activity,
                 latestVersionHint = latestVersionHint,
+                apkUrl = latestVersionHint?.let(ApkUpdater::apkUrlFor),
             ) { latestVersion, isNewer ->
-                val changelog = (state.testUpdateCheckState as? TestUpdateCheckState.UpdateAvailable)?.update?.changelog ?: ""
-                state.testUpdateCheckState =
-                    if (isNewer) {
-                        TestUpdateCheckState.UpdateAvailable(
-                            ApkUpdater.RemoteUpdate(
-                                versionName = latestVersion,
-                                changelog = changelog,
-                            ),
-                        )
-                    } else {
-                        TestUpdateCheckState.Latest(latestVersion)
-                    }
+                if (!isNewer && latestVersionHint == null) state.testUpdateCheckState = TestUpdateCheckState.Latest(latestVersion)
                 state.testUpdateCheckedAtMs = System.currentTimeMillis()
                 renderer.refreshAboutSectionKeepPosition()
             }

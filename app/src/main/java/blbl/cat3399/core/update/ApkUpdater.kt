@@ -84,6 +84,7 @@ object ApkUpdater {
     data class RemoteUpdate(
         val versionName: String,
         val changelog: String,
+        val versions: List<RemoteUpdate> = emptyList(),
     ) {
         val displayChangelog: String
             get() = changelog.ifBlank { "暂无更新日志" }
@@ -140,40 +141,45 @@ object ApkUpdater {
     }
 
     internal fun parseChangelog(raw: String): RemoteUpdate {
+        val versions = parseChangelogVersions(raw)
+        return versions.first().copy(versions = versions)
+    }
+
+    internal fun parseChangelogVersions(raw: String): List<RemoteUpdate> {
         val normalized = raw.replace("\r\n", "\n").replace('\r', '\n').trim()
         check(normalized.isNotBlank()) { "更新日志为空" }
 
         val lines = normalized.lines()
-        val latestHeading =
+        val allHeadings =
             lines.withIndex()
-                .firstNotNullOfOrNull { (index, line) ->
+                .mapNotNull { (index, line) ->
                     parseVersionHeading(line)?.let { heading -> index to heading }
                 }
-                ?: error("未找到版本标题")
+        check(allHeadings.isNotEmpty()) { "未找到版本标题" }
 
-        val (headingIndex, heading) = latestHeading
-        val nextHeadingIndex =
-            lines.withIndex()
-                .drop(headingIndex + 1)
-                .firstOrNull { (_, line) ->
-                    val next = parseVersionHeading(line) ?: return@firstOrNull false
-                    next.level <= heading.level
-                }
-                ?.index
-                ?: lines.size
+        val versionLevel = allHeadings.first().second.level
+        val headings = allHeadings.filter { (_, heading) -> heading.level == versionLevel }
+        return headings.mapIndexed { index, (headingIndex, heading) ->
+            val nextHeadingIndex = headings.getOrNull(index + 1)?.first ?: lines.size
+            val sectionLines =
+                lines.subList(headingIndex + 1, nextHeadingIndex)
+                    .dropLastWhile { it.isBlank() }
+            val changelog =
+                sectionLines
+                    .joinToString("\n")
+                    .trim()
 
-        val sectionLines =
-            lines.subList(headingIndex + 1, nextHeadingIndex)
-                .dropLastWhile { it.isBlank() }
-        val changelog =
-            sectionLines
-                .joinToString("\n")
-                .trim()
+            RemoteUpdate(
+                versionName = heading.versionName,
+                changelog = changelog,
+            )
+        }
+    }
 
-        return RemoteUpdate(
-            versionName = heading.versionName,
-            changelog = changelog,
-        )
+    fun apkUrlFor(versionName: String): String {
+        val cleanVersion = versionName.trim().removePrefix("v")
+        val channel = if (BuildConfig.DEBUG) "debug" else "release"
+        return "https://cat3399.top/blbl/blbl-$cleanVersion-$channel.apk"
     }
 
     private data class VersionHeading(
