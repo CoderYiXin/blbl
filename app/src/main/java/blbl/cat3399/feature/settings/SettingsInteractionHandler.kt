@@ -712,6 +712,12 @@ class SettingsInteractionHandler(
                 ) { selected ->
                     val key = options.firstOrNull { it.second == selected }?.first
                         ?: blbl.cat3399.core.prefs.AppPrefs.API_SOURCE_WEB
+                    if (key == blbl.cat3399.core.prefs.AppPrefs.API_SOURCE_APP &&
+                        prefs.appAuthSession?.accessKey.isNullOrBlank()
+                    ) {
+                        AppToast.show(activity, "首次使用 App 接口需要重新登录")
+                        return@showChoiceDialog
+                    }
                     if (prefs.apiSource == key) {
                         AppToast.show(activity, "接口类别：$selected")
                         return@showChoiceDialog
